@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: collage-creator-backend
+    runtime: python
+    buildCommand: |
+      apt-get update && apt-get install -y ffmpeg
+      pip install -r requirements.txt
+    startCommand: gunicorn app:app --timeout 300 --workers 1
+    envVars:
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false        # inserisci manualmente nel dashboard Render
+      - key: FIREBASE_STORAGE_BUCKET
+        sync: false        # es: collage-creator-xxxxx.appspot.com
+      - key: PORT
+        value: "10000"
+    plan: free             # sleep mode attivo — si sveglia on-demand
+    region: frankfurt      # coerente con Booking Pro
