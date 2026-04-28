@@ -33,14 +33,7 @@ if _sa:
 
 BUCKET = fb_storage.bucket() if _sa else None
 
-# ── Template definitions ───────────────────────────────────
-TEMPLATES = {
-    "sequence":  _build_sequence,
-    "slideshow": _build_slideshow,
-    "grid2x2":   _build_grid2x2,
-    "splitv":    _build_splitv,
-    "splith":    _build_splith,
-}
+# ── Template definitions (populated after functions) ───────
 
 # ── Health check ───────────────────────────────────────────
 @app.route("/", methods=["GET"])
@@ -310,6 +303,17 @@ def _build_splith(media, audio_path, output, w, h, fps):
     cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", output]
     return cmd
 
+
+
+
+
+TEMPLATES = {
+    "sequence":  _build_sequence,
+    "slideshow": _build_slideshow,
+    "grid2x2":   _build_grid2x2,
+    "splitv":    _build_splitv,
+    "splith":    _build_splith,
+}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
