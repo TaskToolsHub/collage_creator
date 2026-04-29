@@ -1,319 +1,186 @@
-"""
-COLLAGE CREATOR — Backend Python
-TaskToolsHub · MIT License
-─────────────────────────────────────────
-Stack: Flask + FFmpeg + Firebase Admin SDK
-Deploy: Render.com (secondo servizio, sleep mode)
-─────────────────────────────────────────
-"""
-
-import os
-import json
-import uuid
-import subprocess
-import tempfile
-import urllib.request
-from pathlib import Path
-from flask import Flask, request, jsonify
+import os, subprocess, tempfile, shutil, uuid
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import firebase_admin
-from firebase_admin import credentials, storage as fb_storage
 
 app = Flask(__name__)
 CORS(app)
 
-# ── Firebase Admin Init ────────────────────────────────────
-# Metti il tuo service account JSON come variabile d'ambiente FIREBASE_SERVICE_ACCOUNT
-_sa = json.loads(os.environ.get("FIREBASE_SERVICE_ACCOUNT", "{}"))
-if _sa:
-    cred = credentials.Certificate(_sa)
-    firebase_admin.initialize_app(cred, {
-        "storageBucket": os.environ.get("FIREBASE_STORAGE_BUCKET", "task-collage-creator.firebasestorage.app")
-    })
-
-BUCKET = fb_storage.bucket() if _sa else None
-
-# ── Template definitions (populated after functions) ───────
-
-# ── Health check ───────────────────────────────────────────
 @app.route("/", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "service": "collage-creator-backend"})
 
-# ── MAIN RENDER ENDPOINT ───────────────────────────────────
 @app.route("/render", methods=["POST"])
 def render():
-    payload = request.get_json()
-    if not payload:
-        return jsonify({"error": "No payload"}), 400
+    tmp = tempfile.mkdtemp()
+    try:
+        template = request.form.get("template", "sequence")
+        project_name = request.form.get("projectName", "collage")
+        media_files = request.files.getlist("media")
+        audio_file = request.files.get("audio")
 
-    project_id   = payload.get("projectId", str(uuid.uuid4()))
-    uid          = payload.get("uid", "anon")
-    template     = payload.get("template", "sequence")
-    media_list   = payload.get("media", [])
-    audio        = payload.get("audio")
-    output_opts  = payload.get("output", {})
+        if not media_files:
+            return jsonify({"error": "Nessun file media ricevuto"}), 400
 
-    if not media_list:
-        return jsonify({"error": "No media provided"}), 400
+        # Save uploaded files
+        paths = []
+        for i, f in enumerate(media_files):
+            ext = os.path.splitext(f.filename)[1] or ".jpg"
+            p = os.path.join(tmp, f"media_{i:03d}{ext}")
+            f.save(p)
+            paths.append(p)
 
-    resolution = output_opts.get("resolution", "1080x1920")
-    fps        = output_opts.get("fps", 30)
-    w, h       = map(int, resolution.split("x"))
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmpdir = Path(tmpdir)
-
-        # 1. Download all media
-        local_media = []
-        for i, m in enumerate(media_list):
-            ext  = m["url"].split("?")[0].split(".")[-1].split("/")[-1] or "mp4"
-            dest = tmpdir / f"media_{i:02d}.{ext}"
-            try:
-                urllib.request.urlretrieve(m["url"], dest)
-                local_media.append({
-                    "path":  str(dest),
-                    "type":  m.get("type", "image/jpeg"),
-                    "index": i,
-                })
-            except Exception as e:
-                return jsonify({"error": f"Download failed for media {i}: {e}"}), 500
-
-        # 2. Download audio
         audio_path = None
-        if audio and audio.get("url"):
-            audio_path = str(tmpdir / "audio.mp3")
-            urllib.request.urlretrieve(audio["url"], audio_path)
+        if audio_file:
+            ext = os.path.splitext(audio_file.filename)[1] or ".mp3"
+            audio_path = os.path.join(tmp, f"audio{ext}")
+            audio_file.save(audio_path)
 
-        # 3. Build FFmpeg command based on template
-        output_path = str(tmpdir / "output.mp4")
-        builder = TEMPLATES.get(template, _build_sequence)
-        cmd = builder(local_media, audio_path, output_path, w, h, fps)
+        output = os.path.join(tmp, f"{project_name.replace(' ','_')}.mp4")
 
-        # 4. Run FFmpeg
+        # Build FFmpeg command based on template
+        cmd = _build_cmd(template, paths, audio_path, output)
+        print(f"FFmpeg cmd: {' '.join(cmd)}")
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            return jsonify({
-                "error": "FFmpeg failed",
-                "stderr": result.stderr[-2000:]
-            }), 500
+            print(f"FFmpeg stderr: {result.stderr}")
+            return jsonify({"error": "FFmpeg failed", "detail": result.stderr[-500:]}), 500
 
-        # 5. Upload to Firebase Storage (auto-delete after 7 days via lifecycle rule)
-        storage_path = f"renders/{uid}/{project_id}/collage_{uuid.uuid4().hex[:8]}.mp4"
-        if BUCKET:
-            blob = BUCKET.blob(storage_path)
-            blob.upload_from_filename(output_path, content_type="video/mp4")
-            blob.make_public()
-            url = blob.public_url
-        else:
-            # Dev fallback — return local path info
-            url = f"file://{output_path}"
-            storage_path = output_path
+        if not os.path.exists(output):
+            return jsonify({"error": "Output file not created"}), 500
 
-        return jsonify({
-            "url":         url,
-            "storagePath": storage_path,
-            "template":    template,
-            "mediaCount":  len(local_media),
-        })
+        return send_file(output, mimetype="video/mp4", as_attachment=True,
+                         download_name=f"{project_name.replace(' ','_')}.mp4")
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Rendering timeout (>5min)"}), 504
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"error": str(e)}), 500
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ─────────────────────────────────────────────────────────
-# FFmpeg template builders
-# Ogni funzione ritorna il comando FFmpeg completo come lista
-# ─────────────────────────────────────────────────────────
+def _build_cmd(template, paths, audio_path, output):
+    if template == "grid2x2":
+        return _build_grid2x2(paths, audio_path, output)
+    elif template == "splitv":
+        return _build_split(paths, audio_path, output, "hstack")
+    elif template == "splith":
+        return _build_split(paths, audio_path, output, "vstack")
+    elif template == "slideshow":
+        return _build_slideshow(paths, audio_path, output)
+    else:
+        return _build_sequence(paths, audio_path, output)
 
-def _photo_duration(is_video):
-    """Foto: 3 secondi fissi. Video: usa durata naturale."""
-    return None if is_video else 3
 
-def _build_sequence(media, audio_path, output, w, h, fps):
-    """
-    Template 1 — Sequenza lineare con dissolvenza
-    Foto: 3 sec ciascuna · Video: durata naturale
-    """
-    inputs = []
+def _build_sequence(paths, audio_path, output):
+    """Linear sequence with crossfade between clips/images."""
+    cmd = ["ffmpeg", "-y"]
     filter_parts = []
-    streams = []
+    n = len(paths)
 
-    for i, m in enumerate(media):
-        is_video = m["type"].startswith("video")
-        if is_video:
-            inputs += ["-i", m["path"]]
+    for i, p in enumerate(paths):
+        ext = os.path.splitext(p)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+            cmd += ["-loop", "1", "-t", "3", "-i", p]
         else:
-            inputs += ["-loop", "1", "-t", "3", "-i", m["path"]]
+            cmd += ["-t", "15", "-i", p]
 
-        # Scale + pad to target resolution
-        filter_parts.append(
-            f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,"
-            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"setsar=1,fps={fps}[v{i}]"
-        )
-        streams.append(f"[v{i}]")
+    # Scale all to 1280x720
+    for i in range(n):
+        filter_parts.append(f"[{i}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}]")
 
-    n = len(media)
-    concat_filter = "".join(streams) + f"concat=n={n}:v=1:a=0[vout]"
-    filter_complex = ";".join(filter_parts) + ";" + concat_filter
+    # Concat
+    concat_in = "".join(f"[v{i}]" for i in range(n))
+    filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
+    cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[outv]"]
 
-    cmd = ["ffmpeg", "-y"] + inputs
     if audio_path:
-        cmd += ["-i", audio_path]
-    cmd += [
-        "-filter_complex", filter_complex,
-        "-map", "[vout]",
-    ]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast",
-            "-c:a", "aac", "-b:a", "128k", output]
+        cmd += ["-i", audio_path, "-map", f"{n}:a", "-shortest"]
+
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
     return cmd
 
 
-def _build_slideshow(media, audio_path, output, w, h, fps):
-    """
-    Template 2 — Slideshow con Ken Burns zoom
-    Solo foto, 4 secondi con leggero zoom in
-    """
-    inputs = []
+def _build_slideshow(paths, audio_path, output):
+    """Ken Burns style slideshow with zoompan."""
+    cmd = ["ffmpeg", "-y"]
     filter_parts = []
-    streams = []
+    n = len(paths)
 
-    for i, m in enumerate(media):
-        inputs += ["-loop", "1", "-t", "4", "-i", m["path"]]
-        zoom_filter = (
-            f"[{i}:v]scale={w*2}:{h*2}:force_original_aspect_ratio=increase,"
-            f"zoompan=z='min(zoom+0.0015,1.5)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-            f"d={fps*4}:s={w}x{h}:fps={fps},"
-            f"setsar=1[v{i}]"
-        )
-        filter_parts.append(zoom_filter)
-        streams.append(f"[v{i}]")
+    for i, p in enumerate(paths):
+        cmd += ["-loop", "1", "-t", "4", "-i", p]
 
-    n = len(media)
-    concat = "".join(streams) + f"concat=n={n}:v=1:a=0[vout]"
-    filter_complex = ";".join(filter_parts) + ";" + concat
+    for i in range(n):
+        filter_parts.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z='min(zoom+0.001,1.2)':d=120:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720,fps=30[v{i}]")
 
-    cmd = ["ffmpeg", "-y"] + inputs
+    concat_in = "".join(f"[v{i}]" for i in range(n))
+    filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
+    cmd += ["-filter_complex", ";".join(filter_parts), "-map", "[outv]"]
+
     if audio_path:
-        cmd += ["-i", audio_path]
-    cmd += ["-filter_complex", filter_complex, "-map", "[vout]"]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "22", "-preset", "fast",
-            "-c:a", "aac", "-b:a", "128k", output]
+        cmd += ["-i", audio_path, "-map", f"{n}:a", "-shortest"]
+
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
     return cmd
 
 
-def _build_grid2x2(media, audio_path, output, w, h, fps):
-    """
-    Template 3 — Griglia 2×2 simultanea
-    Usa i primi 4 media
-    """
-    clips = media[:4]
-    inputs = []
-    scale_parts = []
-    hw, hh = w // 2, h // 2
+def _build_grid2x2(paths, audio_path, output):
+    """2x2 grid layout with up to 4 media files."""
+    cmd = ["ffmpeg", "-y"]
+    use = paths[:4]
+    while len(use) < 4:
+        use.append(use[-1])
+    n = len(use)
 
-    for i, m in enumerate(clips):
-        is_video = m["type"].startswith("video")
-        if is_video:
-            inputs += ["-i", m["path"]]
+    for p in use:
+        ext = os.path.splitext(p)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+            cmd += ["-loop", "1", "-t", "5", "-i", p]
         else:
-            inputs += ["-loop", "1", "-t", "5", "-i", m["path"]]
-        scale_parts.append(
-            f"[{i}:v]scale={hw}:{hh}:force_original_aspect_ratio=decrease,"
-            f"pad={hw}:{hh}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps={fps}[s{i}]"
-        )
+            cmd += ["-t", "15", "-i", p]
 
-    # Fill missing slots with black
-    while len(clips) < 4:
-        scale_parts.append(f"color=black:size={hw}x{hh}:rate={fps}[s{len(clips)}]")
-        clips.append(None)
+    filt = ""
+    for i in range(4):
+        filt += f"[{i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}];"
+    filt += "[v0][v1]hstack[top];[v2][v3]hstack[bot];[top][bot]vstack[outv]"
+    cmd += ["-filter_complex", filt, "-map", "[outv]"]
 
-    layout = f"[s0][s1]hstack[top];[s2][s3]hstack[bot];[top][bot]vstack[vout]"
-    filter_complex = ";".join(scale_parts) + ";" + layout
-
-    cmd = ["ffmpeg", "-y"] + inputs
     if audio_path:
-        cmd += ["-i", audio_path]
-    cmd += ["-filter_complex", filter_complex, "-map", "[vout]", "-t", "10"]
-    if audio_path:
-        cmd += ["-map", f"{len(inputs)//2}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast",
-            "-c:a", "aac", output]
+        cmd += ["-i", audio_path, "-map", f"{n}:a", "-shortest"]
+
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
     return cmd
 
 
-def _build_splitv(media, audio_path, output, w, h, fps):
-    """Template 4 — Split verticale (2 clip affiancate)"""
-    clips = media[:2]
-    inputs = []
-    half_w = w // 2
+def _build_split(paths, audio_path, output, stack_type):
+    """Split screen: hstack (side by side) or vstack (top/bottom)."""
+    cmd = ["ffmpeg", "-y"]
+    use = paths[:2]
+    while len(use) < 2:
+        use.append(use[-1])
+    n = len(use)
 
-    for i, m in enumerate(clips):
-        is_video = m["type"].startswith("video")
-        if is_video:
-            inputs += ["-i", m["path"]]
+    w, h = (640, 720) if stack_type == "hstack" else (1280, 360)
+    for p in use:
+        ext = os.path.splitext(p)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+            cmd += ["-loop", "1", "-t", "5", "-i", p]
         else:
-            inputs += ["-loop", "1", "-t", "5", "-i", m["path"]]
+            cmd += ["-t", "15", "-i", p]
 
-    scale = (
-        f"[0:v]scale={half_w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={half_w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}[l];"
-        f"[1:v]scale={half_w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={half_w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}[r];"
-        f"[l][r]hstack[vout]"
-    )
-    cmd = ["ffmpeg", "-y"] + inputs
+    filt = ""
+    for i in range(2):
+        filt += f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}];"
+    filt += f"[v0][v1]{stack_type}[outv]"
+    cmd += ["-filter_complex", filt, "-map", "[outv]"]
+
     if audio_path:
-        cmd += ["-i", audio_path]
-    cmd += ["-filter_complex", scale, "-map", "[vout]", "-t", "10"]
-    if audio_path:
-        cmd += ["-map", f"{len(clips)}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", output]
+        cmd += ["-i", audio_path, "-map", f"{n}:a", "-shortest"]
+
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
     return cmd
 
-
-def _build_splith(media, audio_path, output, w, h, fps):
-    """Template 5 — Split orizzontale (sopra/sotto)"""
-    clips = media[:2]
-    inputs = []
-    half_h = h // 2
-
-    for i, m in enumerate(clips):
-        is_video = m["type"].startswith("video")
-        if is_video:
-            inputs += ["-i", m["path"]]
-        else:
-            inputs += ["-loop", "1", "-t", "5", "-i", m["path"]]
-
-    scale = (
-        f"[0:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}[t];"
-        f"[1:v]scale={w}:{half_h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{half_h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps}[b];"
-        f"[t][b]vstack[vout]"
-    )
-    cmd = ["ffmpeg", "-y"] + inputs
-    if audio_path:
-        cmd += ["-i", audio_path]
-    cmd += ["-filter_complex", scale, "-map", "[vout]", "-t", "10"]
-    if audio_path:
-        cmd += ["-map", f"{len(clips)}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", output]
-    return cmd
-
-
-
-
-
-TEMPLATES = {
-    "sequence":  _build_sequence,
-    "slideshow": _build_slideshow,
-    "grid2x2":   _build_grid2x2,
-    "splitv":    _build_splitv,
-    "splith":    _build_splith,
-}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

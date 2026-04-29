@@ -1,0 +1,6 @@
+﻿node_modules/
+_step*.py
+__pycache__/
+*.pyc
+dist/
+.env
