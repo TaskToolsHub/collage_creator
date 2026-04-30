@@ -88,7 +88,7 @@ def _build_sequence(paths, audio_path, output):
 
     # Scale all to 1280x720
     for i in range(n):
-        filter_parts.append(f"[{i}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}]")
+        filter_parts.append(f"[{i}:v]scale=1280:720:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}]")
 
     # Concat
     concat_in = "".join(f"[v{i}]" for i in range(n))
@@ -112,7 +112,7 @@ def _build_slideshow(paths, audio_path, output):
         cmd += ["-loop", "1", "-t", "4", "-i", p]
 
     for i in range(n):
-        filter_parts.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z='min(zoom+0.001,1.2)':d=120:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720,fps=30[v{i}]")
+        filter_parts.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=disable,format=yuv420p,zoompan=z='min(zoom+0.001,1.2)':d=120:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1280x720,fps=30[v{i}]")
 
     concat_in = "".join(f"[v{i}]" for i in range(n))
     filter_parts.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
@@ -142,7 +142,7 @@ def _build_grid2x2(paths, audio_path, output):
 
     filt = ""
     for i in range(4):
-        filt += f"[{i}:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}];"
+        filt += f"[{i}:v]scale=640:360:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}];"
     filt += "[v0][v1]hstack[top];[v2][v3]hstack[bot];[top][bot]vstack[outv]"
     cmd += ["-filter_complex", filt, "-map", "[outv]"]
 
@@ -171,7 +171,7 @@ def _build_split(paths, audio_path, output, stack_type):
 
     filt = ""
     for i in range(2):
-        filt += f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30[v{i}];"
+        filt += f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}];"
     filt += f"[v0][v1]{stack_type}[outv]"
     cmd += ["-filter_complex", filt, "-map", "[outv]"]
 
