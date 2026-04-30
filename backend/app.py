@@ -57,6 +57,9 @@ def render():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# Shared scale filter: letterbox (barre nere) per mantenere proporzioni
+SCALE_HD = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
+
 def _build_cmd(template, paths, audio_path, output):
     if template == "grid2x2":
         return _build_grid2x2(paths, audio_path, output)
@@ -70,45 +73,55 @@ def _build_cmd(template, paths, audio_path, output):
         return _build_sequence(paths, audio_path, output)
 
 
+def _img_duration(i, total, has_audio):
+    """Ultima immagine dura 60s se c'e' audio (tagliata da -shortest)."""
+    if has_audio and i == total - 1:
+        return "60"
+    return "3"
+
+
 def _build_sequence(paths, audio_path, output):
     cmd = ["ffmpeg", "-y"]
     n = len(paths)
-    for p in paths:
+    for i, p in enumerate(paths):
         ext = os.path.splitext(p)[1].lower()
+        dur = _img_duration(i, n, audio_path)
         if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", "3", "-i", p]
+            cmd += ["-loop", "1", "-t", dur, "-i", p]
         else:
             cmd += ["-t", "15", "-i", p]
     if audio_path:
         cmd += ["-i", audio_path]
     filters = []
     for i in range(n):
-        filters.append(f"[{i}:v]scale=1280:720:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}]")
+        filters.append(f"[{i}:v]{SCALE_HD}[v{i}]")
     concat_in = "".join(f"[v{i}]" for i in range(n))
     filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
     cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
     if audio_path:
         cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
     return cmd
 
 
 def _build_slideshow(paths, audio_path, output):
     cmd = ["ffmpeg", "-y"]
     n = len(paths)
-    for p in paths:
-        cmd += ["-loop", "1", "-t", "4", "-i", p]
+    for i, p in enumerate(paths):
+        dur = _img_duration(i, n, audio_path)
+        cmd += ["-loop", "1", "-t", dur, "-i", p]
     if audio_path:
         cmd += ["-i", audio_path]
     filters = []
     for i in range(n):
-        filters.append(f"[{i}:v]scale=1280:720:force_original_aspect_ratio=disable,format=yuv420p,zoompan=z=\'min(zoom+0.001,1.2)\':d=120:x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':s=1280x720,fps=30,setsar=1[v{i}]")
+        d = 120 if (audio_path and i == n-1) else 120
+        filters.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,zoompan=z=\'min(zoom+0.001,1.2)\':d={d}:x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':s=1280x720,fps=30,setsar=1[v{i}]")
     concat_in = "".join(f"[v{i}]" for i in range(n))
     filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
     cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
     if audio_path:
         cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
     return cmd
 
 
@@ -117,23 +130,25 @@ def _build_grid2x2(paths, audio_path, output):
     use = paths[:4]
     while len(use) < 4:
         use.append(use[-1])
-    for p in use:
+    for i, p in enumerate(use):
         ext = os.path.splitext(p)[1].lower()
+        dur = _img_duration(i, len(use), audio_path)
         if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", "5", "-i", p]
+            cmd += ["-loop", "1", "-t", dur, "-i", p]
         else:
             cmd += ["-t", "15", "-i", p]
     n = len(use)
     if audio_path:
         cmd += ["-i", audio_path]
+    CELL = "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
     filt = ""
     for i in range(4):
-        filt += f"[{i}:v]scale=640:360:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}];"
+        filt += f"[{i}:v]{CELL}[v{i}];"
     filt += "[v0][v1]hstack[top];[v2][v3]hstack[bot];[top][bot]vstack[outv]"
     cmd += ["-filter_complex", filt, "-map", "[outv]"]
     if audio_path:
         cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
     return cmd
 
 
@@ -143,23 +158,25 @@ def _build_split(paths, audio_path, output, stack_type):
     while len(use) < 2:
         use.append(use[-1])
     w, h = (640, 720) if stack_type == "hstack" else (1280, 360)
-    for p in use:
+    for i, p in enumerate(use):
         ext = os.path.splitext(p)[1].lower()
+        dur = _img_duration(i, len(use), audio_path)
         if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", "5", "-i", p]
+            cmd += ["-loop", "1", "-t", dur, "-i", p]
         else:
             cmd += ["-t", "15", "-i", p]
     n = len(use)
     if audio_path:
         cmd += ["-i", audio_path]
+    CELL = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
     filt = ""
     for i in range(2):
-        filt += f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=disable,format=yuv420p,setsar=1,fps=30[v{i}];"
+        filt += f"[{i}:v]{CELL}[v{i}];"
     filt += f"[v0][v1]{stack_type}[outv]"
     cmd += ["-filter_complex", filt, "-map", "[outv]"]
     if audio_path:
         cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-pix_fmt", "yuv420p", output]
+    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
     return cmd
 
 

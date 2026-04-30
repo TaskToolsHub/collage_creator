@@ -28,18 +28,22 @@ export default function Dashboard({ user }) {
 
   async function loadHistory() {
     try {
-      const q = query(collection(db, "projects"), where("uid", "==", user.uid), orderBy("createdAt", "desc"));
+      const q = query(collection(db, "projects"), where("uid", "==", user.uid));
       const snap = await getDocs(q);
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       const now = Date.now();
       const WEEK = 7*24*60*60*1000;
+      const valid = [];
       for (const d of docs) {
         if (d.createdAt && (now - d.createdAt.toMillis()) > WEEK) {
           try { await deleteDoc(doc(db, "projects", d.id)); } catch {}
+        } else {
+          valid.push(d);
         }
       }
-      setHistory(docs.filter(d => !d.createdAt || (now - d.createdAt.toMillis()) <= WEEK));
-    } catch (e) { console.error(e); }
+      valid.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      setHistory(valid);
+    } catch (e) { console.error("loadHistory error:", e); }
   }
 
   function handleDrop(e) {
@@ -49,6 +53,11 @@ export default function Dashboard({ user }) {
   }
 
   function removeFile(idx) { setFiles(prev => prev.filter((_, i) => i !== idx)); }
+
+  function resetForm() {
+    setName(""); setTemplate("sequence"); setFiles([]);
+    setAudioFile(null); setStatus(null); setVideoUrl(null); setErrorMsg("");
+  }
 
   async function handleGenerate() {
     if (!name.trim()) { alert("Inserisci un nome."); return; }
@@ -121,19 +130,19 @@ export default function Dashboard({ user }) {
               <input id="fileInput" type="file" multiple accept="image/*,video/*" onChange={e=>setFiles(prev=>[...prev,...Array.from(e.target.files)])} style={{ display: "none" }} />
             </div>
             {files.length>0 && (
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "0.8rem" }}>
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "0.8rem" }}>
                 {files.map((f,i)=>(
-                  <div key={i} style={{ position: "relative", width: 56, height: 72, borderRadius: "4px", background: "#1e293b", border: "1px solid rgba(0,212,168,0.3)", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {f.type.startsWith("video")?<span>V</span>:<img src={URL.createObjectURL(f)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.7)", fontSize: "0.45rem", padding: "2px 4px", display: "flex", justifyContent: "space-between", color: "#00d4a8" }}>
-                      <span>{i+1}</span>
-                      <span onClick={e=>{e.stopPropagation();removeFile(i);}} style={{ color: "#f43f5e", cursor: "pointer" }}>x</span>
+                  <div key={i} style={{ position: "relative", width: 64, height: 80, borderRadius: "6px", background: "#1e293b", border: "1px solid rgba(0,212,168,0.3)", overflow: "hidden" }}>
+                    {f.type.startsWith("video")?<div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",fontSize:"1.5rem"}}>V</div>:<img src={URL.createObjectURL(f)} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.8)", fontSize: "0.5rem", padding: "3px 5px", display: "flex", justifyContent: "space-between", alignItems: "center", color: "#00d4a8" }}>
+                      <span style={{ fontWeight: 700 }}>{i+1}</span>
+                      <span onClick={e=>{e.stopPropagation();removeFile(i);}} style={{ color: "#f43f5e", cursor: "pointer", fontSize: "0.8rem", fontWeight: 900, lineHeight: 1 }}>X</span>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-            {files.length>0 && <div style={{ fontSize: "0.6rem", color: "#475569", marginTop: "0.5rem" }}>{files.length} file</div>}
+            {files.length>0 && <div style={{ fontSize: "0.6rem", color: "#475569", marginTop: "0.5rem" }}>{files.length} file selezionati</div>}
           </div>
           <div style={{ marginBottom: "1.5rem" }}>
             <div style={S.lbl}>AUDIO (opzionale)</div>
@@ -141,16 +150,14 @@ export default function Dashboard({ user }) {
               <div style={{ fontSize: "0.65rem", color: "#a855f7" }}>{audioFile?audioFile.name:"Clicca per aggiungere musica"}</div>
               <input id="audioInput" type="file" accept="audio/*" onChange={e=>setAudioFile(e.target.files[0])} style={{ display: "none" }} />
             </div>
-            {audioFile && <button onClick={()=>setAudioFile(null)} style={{ marginTop: "0.3rem", background: "transparent", border: "none", color: "#f43f5e", fontSize: "0.55rem", cursor: "pointer" }}>x Rimuovi</button>}
+            {audioFile && <button onClick={()=>setAudioFile(null)} style={{ marginTop: "0.3rem", background: "transparent", border: "none", color: "#f43f5e", fontSize: "0.6rem", cursor: "pointer", fontFamily: "'Courier New', monospace" }}>X Rimuovi audio</button>}
           </div>
-          {status==="generating" && <div style={{ padding: "1rem", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: "8px", marginBottom: "1.5rem", textAlign: "center" }}><div style={{ fontSize: "0.7rem", color: "#3b82f6", fontWeight: 700 }}>RENDERING...</div><div style={{ fontSize: "0.55rem", color: "#475569", marginTop: "0.3rem" }}>Attendi 30-90 secondi</div></div>}
-          {status==="done" && videoUrl && <div style={{ padding: "1rem", background: "rgba(0,212,168,0.1)", border: "1px solid rgba(0,212,168,0.4)", borderRadius: "8px", marginBottom: "1.5rem", textAlign: "center" }}><div style={{ fontSize: "0.7rem", color: "#00d4a8", fontWeight: 700 }}>COLLAGE PRONTO!</div><a href={videoUrl} download={name.trim()+".mp4"} style={{ display: "inline-block", marginTop: "0.8rem", padding: "0.5rem 1.5rem", background: "rgba(0,212,168,0.15)", border: "1px solid #00d4a8", color: "#00d4a8", borderRadius: "4px", fontSize: "0.7rem", textDecoration: "none", fontFamily: "'Courier New', monospace" }}>SCARICA VIDEO</a></div>}
+          {status==="generating" && <div style={{ padding: "1.2rem", background: "rgba(59,130,246,0.1)", border: "1px solid rgba(59,130,246,0.4)", borderRadius: "8px", marginBottom: "1.5rem", textAlign: "center" }}><div style={{ fontSize: "0.75rem", color: "#3b82f6", fontWeight: 700 }}>RENDERING...</div><div style={{ fontSize: "0.55rem", color: "#475569", marginTop: "0.4rem" }}>FFmpeg sta elaborando. Attendi 30-120 secondi.</div></div>}
+          {status==="done" && videoUrl && <div style={{ padding: "1.2rem", background: "rgba(0,212,168,0.1)", border: "1px solid rgba(0,212,168,0.4)", borderRadius: "8px", marginBottom: "1.5rem", textAlign: "center" }}><div style={{ fontSize: "0.75rem", color: "#00d4a8", fontWeight: 700 }}>COLLAGE PRONTO!</div><div style={{display:"flex",gap:"0.8rem",justifyContent:"center",marginTop:"0.8rem",flexWrap:"wrap"}}><a href={videoUrl} download={name.trim()+".mp4"} style={{ padding: "0.5rem 1.5rem", background: "rgba(0,212,168,0.15)", border: "1px solid #00d4a8", color: "#00d4a8", borderRadius: "4px", fontSize: "0.7rem", textDecoration: "none", fontFamily: "'Courier New', monospace" }}>SCARICA VIDEO</a><button onClick={resetForm} style={{ padding: "0.5rem 1.5rem", background: "transparent", border: "1px solid #3b82f6", color: "#3b82f6", borderRadius: "4px", fontSize: "0.7rem", cursor: "pointer", fontFamily: "'Courier New', monospace" }}>+ NUOVO PROGETTO</button></div></div>}
           {status==="error" && <div style={{ padding: "1rem", background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.4)", borderRadius: "8px", marginBottom: "1.5rem" }}><div style={{ fontSize: "0.7rem", color: "#f43f5e", fontWeight: 700 }}>ERRORE</div><div style={{ fontSize: "0.6rem", color: "#f43f5e", marginTop: "0.3rem" }}>{errorMsg}</div></div>}
-          <div style={{ textAlign: "center", marginTop: "1rem" }}>
-            <button onClick={handleGenerate} disabled={status==="generating"} style={{ padding: "0.8rem 2rem", background: status==="generating"?"#1e293b":"rgba(0,212,168,0.15)", border: "1px solid "+(status==="generating"?"#334155":"#00d4a8"), color: status==="generating"?"#475569":"#00d4a8", borderRadius: "6px", fontSize: "0.75rem", cursor: status==="generating"?"not-allowed":"pointer", fontFamily: "'Courier New', monospace", letterSpacing: "0.15em", fontWeight: 700 }}>
-              {status==="generating"?"ELABORAZIONE...":"GENERA COLLAGE"}
-            </button>
-          </div>
+          {status!=="generating" && <div style={{ textAlign: "center", marginTop: "1rem" }}>
+            <button onClick={handleGenerate} style={{ padding: "0.8rem 2rem", background: "rgba(0,212,168,0.15)", border: "1px solid #00d4a8", color: "#00d4a8", borderRadius: "6px", fontSize: "0.75rem", cursor: "pointer", fontFamily: "'Courier New', monospace", letterSpacing: "0.15em", fontWeight: 700 }}>GENERA COLLAGE</button>
+          </div>}
         </div>)}
         {tab==="history" && (<div>
           <div style={{ marginBottom: "1.5rem" }}>
@@ -166,7 +173,7 @@ export default function Dashboard({ user }) {
                     <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "#f8fafc" }}>{p.name}</div>
                     <div style={{ fontSize: "0.55rem", color: "#475569", marginTop: "0.2rem" }}>{p.mediaCount||0} MEDIA - {(p.template||"sequence").toUpperCase()}{p.hasAudio?" - AUDIO":""}</div>
                   </div>
-                  <button onClick={async()=>{await deleteDoc(doc(db,"projects",p.id));loadHistory();}} style={{ background: "transparent", border: "1px solid rgba(244,63,94,0.3)", color: "#f43f5e", padding: "0.3rem 0.6rem", borderRadius: "4px", fontSize: "0.55rem", cursor: "pointer", fontFamily: "'Courier New', monospace" }}>x</button>
+                  <button onClick={async()=>{await deleteDoc(doc(db,"projects",p.id));loadHistory();}} style={{ background: "transparent", border: "1px solid rgba(244,63,94,0.3)", color: "#f43f5e", padding: "0.3rem 0.6rem", borderRadius: "4px", fontSize: "0.55rem", cursor: "pointer", fontFamily: "'Courier New', monospace" }}>X</button>
                 </div>
               ))}
             </div>
