@@ -7,19 +7,23 @@ CORS(app)
 
 @app.route("/", methods=["GET"])
 def health():
-    return jsonify({"status": "ok", "service": "collage-creator-backend"})
+    return jsonify({"status": "ok", "service": "collage-creator-v4"})
 
 @app.route("/render", methods=["POST"])
 def render():
     tmp = tempfile.mkdtemp()
     try:
-        template = request.form.get("template", "sequence")
+        template = request.form.get("template", "fade")
         project_name = request.form.get("projectName", "collage")
+        voice_vol = float(request.form.get("voiceVolume", 1.0))
+        music_vol = float(request.form.get("musicVolume", 0.2))
+        
         media_files = request.files.getlist("media")
-        audio_file = request.files.get("audio")
+        voice_file = request.files.get("voice")
+        music_file = request.files.get("music")
 
         if not media_files:
-            return jsonify({"error": "Nessun file media ricevuto"}), 400
+            return jsonify({"error": "Nessun file media"}), 400
 
         paths = []
         for i, f in enumerate(media_files):
@@ -28,158 +32,97 @@ def render():
             f.save(p)
             paths.append(p)
 
-        audio_path = None
-        if audio_file:
-            ext = os.path.splitext(audio_file.filename)[1] or ".mp3"
-            audio_path = os.path.join(tmp, f"audio{ext}")
-            audio_file.save(audio_path)
+        voice_path = None
+        if voice_file:
+            voice_path = os.path.join(tmp, "voice.mp3")
+            voice_file.save(voice_path)
+
+        music_path = None
+        if music_file:
+            music_path = os.path.join(tmp, "music.mp3")
+            music_file.save(music_path)
 
         output = os.path.join(tmp, f"{project_name.replace(' ','_')}.mp4")
-        cmd = _build_cmd(template, paths, audio_path, output)
-        print(f"FFmpeg: {' '.join(cmd)}")
+        cmd = _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output)
+        print(f"FFmpeg V4: {' '.join(cmd)}")
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
-            print(f"STDERR: {result.stderr[-800:]}")
             return jsonify({"error": "FFmpeg failed", "detail": result.stderr[-500:]}), 500
 
-        if not os.path.exists(output):
-            return jsonify({"error": "Output not created"}), 500
-
-        return send_file(output, mimetype="video/mp4", as_attachment=True,
-                         download_name=f"{project_name.replace(' ','_')}.mp4")
+        return send_file(output, mimetype="video/mp4", as_attachment=True, download_name=f"{project_name.replace(' ','_')}.mp4")
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Timeout >5min"}), 504
     except Exception as e:
-        print(f"Error: {e}")
         return jsonify({"error": str(e)}), 500
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
+    cmd = ["ffmpeg", "-y"]
+    n = len(paths)
+    
+    for p in paths:
+        ext = os.path.splitext(p)[1].lower()
+        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
+            cmd += ["-loop", "1", "-t", "3", "-i", p]
+        else:
+            cmd += ["-t", "10", "-i", p]
+            
+    audio_idx_voice = -1
+    audio_idx_music = -1
+    if voice_path:
+        cmd += ["-i", voice_path]
+        audio_idx_voice = n
+    if music_path:
+        cmd += ["-i", music_path]
+        audio_idx_music = n + (1 if voice_path else 0)
 
-# Shared scale filter: letterbox (barre nere) per mantenere proporzioni
-SCALE_HD = "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
+    w, h = (720, 1280) if template == "vertical" else (1280, 720)
+    
+    filters = []
+    for i in range(n):
+        if template == "fade":
+            filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fade=t=out:st=2.5:d=0.5,format=yuv420p,setsar=1,fps=30[v{i}]")
+        elif template == "pip" and i > 0:
+            filters.append(f"[{i}:v]scale=320:-1[pip{i}]")
+        else:
+            filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30[v{i}]")
 
-def _build_cmd(template, paths, audio_path, output):
-    if template == "grid2x2":
-        return _build_grid2x2(paths, audio_path, output)
-    elif template == "splitv":
-        return _build_split(paths, audio_path, output, "hstack")
-    elif template == "splith":
-        return _build_split(paths, audio_path, output, "vstack")
-    elif template == "slideshow":
-        return _build_slideshow(paths, audio_path, output)
+    if template == "pip":
+        if n > 1:
+            filters.append(f"[v0][pip1]overlay=main_w-overlay_w-20:main_h-overlay_h-20[outv]")
+        else:
+            filters.append(f"[v0]copy[outv]")
     else:
-        return _build_sequence(paths, audio_path, output)
-
-
-def _img_duration(i, total, has_audio):
-    """Ultima immagine dura 60s se c'e' audio (tagliata da -shortest)."""
-    if has_audio and i == total - 1:
-        return "60"
-    return "3"
-
-
-def _build_sequence(paths, audio_path, output):
-    cmd = ["ffmpeg", "-y"]
-    n = len(paths)
-    for i, p in enumerate(paths):
-        ext = os.path.splitext(p)[1].lower()
-        dur = _img_duration(i, n, audio_path)
-        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", dur, "-i", p]
-        else:
-            cmd += ["-t", "15", "-i", p]
-    if audio_path:
-        cmd += ["-i", audio_path]
-    filters = []
-    for i in range(n):
-        filters.append(f"[{i}:v]{SCALE_HD}[v{i}]")
-    concat_in = "".join(f"[v{i}]" for i in range(n))
-    filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
+        concat_in = "".join(f"[{i}:v]" for i in range(n))
+        filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
+        
     cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
-    return cmd
 
-
-def _build_slideshow(paths, audio_path, output):
-    cmd = ["ffmpeg", "-y"]
-    n = len(paths)
-    for i, p in enumerate(paths):
-        dur = _img_duration(i, n, audio_path)
-        cmd += ["-loop", "1", "-t", dur, "-i", p]
-    if audio_path:
-        cmd += ["-i", audio_path]
-    filters = []
-    for i in range(n):
-        d = 120 if (audio_path and i == n-1) else 120
-        filters.append(f"[{i}:v]scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,zoompan=z=\'min(zoom+0.001,1.2)\':d={d}:x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':s=1280x720,fps=30,setsar=1[v{i}]")
-    concat_in = "".join(f"[v{i}]" for i in range(n))
-    filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
-    cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
-    return cmd
-
-
-def _build_grid2x2(paths, audio_path, output):
-    cmd = ["ffmpeg", "-y"]
-    use = paths[:4]
-    while len(use) < 4:
-        use.append(use[-1])
-    for i, p in enumerate(use):
-        ext = os.path.splitext(p)[1].lower()
-        dur = _img_duration(i, len(use), audio_path)
-        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", dur, "-i", p]
+    if voice_path or music_path:
+        audio_filter = ""
+        inputs = 0
+        amap = []
+        if voice_path:
+            audio_filter += f"[{audio_idx_voice}:a]volume={voice_vol}[aV];"
+            amap.append("[aV]")
+            inputs += 1
+        if music_path:
+            audio_filter += f"[{audio_idx_music}:a]volume={music_vol}[aM];"
+            amap.append("[aM]")
+            inputs += 1
+            
+        if inputs == 2:
+            audio_filter += f"[aV][aM]amix=inputs=2:duration=first:dropout_transition=2[outa]"
+            cmd += ["-filter_complex", audio_filter, "-map", "[outa]"]
         else:
-            cmd += ["-t", "15", "-i", p]
-    n = len(use)
-    if audio_path:
-        cmd += ["-i", audio_path]
-    CELL = "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
-    filt = ""
-    for i in range(4):
-        filt += f"[{i}:v]{CELL}[v{i}];"
-    filt += "[v0][v1]hstack[top];[v2][v3]hstack[bot];[top][bot]vstack[outv]"
-    cmd += ["-filter_complex", filt, "-map", "[outv]"]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
+            audio_filter += f"{amap[0]}copy[outa]"
+            cmd += ["-filter_complex", audio_filter, "-map", "[outa]"]
+        cmd += ["-shortest"]
+
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-movflags", "+faststart", output]
     return cmd
-
-
-def _build_split(paths, audio_path, output, stack_type):
-    cmd = ["ffmpeg", "-y"]
-    use = paths[:2]
-    while len(use) < 2:
-        use.append(use[-1])
-    w, h = (640, 720) if stack_type == "hstack" else (1280, 360)
-    for i, p in enumerate(use):
-        ext = os.path.splitext(p)[1].lower()
-        dur = _img_duration(i, len(use), audio_path)
-        if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", dur, "-i", p]
-        else:
-            cmd += ["-t", "15", "-i", p]
-    n = len(use)
-    if audio_path:
-        cmd += ["-i", audio_path]
-    CELL = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30"
-    filt = ""
-    for i in range(2):
-        filt += f"[{i}:v]{CELL}[v{i}];"
-    filt += f"[v0][v1]{stack_type}[outv]"
-    cmd += ["-filter_complex", filt, "-map", "[outv]"]
-    if audio_path:
-        cmd += ["-map", f"{n}:a", "-shortest"]
-    cmd += ["-c:v", "libx264", "-crf", "23", "-preset", "fast", "-movflags", "+faststart", output]
-    return cmd
-
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
