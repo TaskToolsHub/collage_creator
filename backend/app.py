@@ -124,7 +124,7 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
         concat_in = "".join(f"[v{i}]" for i in range(n))
         filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
         
-    cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
+    graph = ";".join(filters)
 
     if voice_path or music_path:
         audio_filter = ""
@@ -141,11 +141,13 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
             
         if inputs == 2:
             audio_filter += f"[aV][aM]amix=inputs=2:duration=first:dropout_transition=2[outa]"
-            cmd += ["-filter_complex", audio_filter, "-map", "[outa]"]
         else:
             audio_filter += f"{amap[0]}copy[outa]"
-            cmd += ["-filter_complex", audio_filter, "-map", "[outa]"]
-        cmd += ["-shortest"]
+            
+        graph += ";" + audio_filter
+        cmd += ["-filter_complex", graph, "-map", "[outv]", "-map", "[outa]", "-shortest"]
+    else:
+        cmd += ["-filter_complex", graph, "-map", "[outv]"]
 
     cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-movflags", "+faststart", output]
     return cmd
