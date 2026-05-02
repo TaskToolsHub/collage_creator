@@ -1,12 +1,40 @@
-﻿<!DOCTYPE html>
-<html lang="it">
+<!DOCTYPE html>
+<html lang="en" class="dark" translate="no">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Collage Creator - TaskToolsHub</title>
-    <style>* { margin:0; padding:0; box-sizing:border-box; } body { background:#080c10; font-family:'Courier New',monospace; }</style>
+    <title>AI Video Studio</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              secondary: "#d7ffc5", "on-surface": "#e5e2e1", primary: "#007AFF",
+              background: "#0A0A0A", "surface-container-low": "#1c1b1b",
+              "surface-container-high": "#2a2a2a", "secondary-fixed-dim": "#2ae500",
+            },
+            fontFamily: {
+              "body-md": ["Inter"], "label-caps": ["Space Grotesk"],
+              "headline-lg": ["Inter"], "headline-md": ["Inter"],
+              "mono-metrics": ["Space Grotesk"]
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
+      .glass-panel { background: rgba(30, 30, 30, 0.6); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); }
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: #0A0A0A; }
+      ::-webkit-scrollbar-thumb { background: #2A2A2A; border-radius: 10px; }
+    </style>
   </head>
-  <body>
+  <body class="bg-[#0A0A0A] text-[#e5e2e1] font-sans overflow-hidden">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

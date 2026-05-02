@@ -95,7 +95,7 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
         else:
             filters.append(f"[v0]copy[outv]")
     else:
-        concat_in = "".join(f"[{i}:v]" for i in range(n))
+        concat_in = "".join(f"[v{i}]" for i in range(n))
         filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
         
     cmd += ["-filter_complex", ";".join(filters), "-map", "[outv]"]
