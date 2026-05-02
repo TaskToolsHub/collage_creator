@@ -60,12 +60,16 @@ def render():
         shutil.rmtree(tmp, ignore_errors=True)
 
 def get_duration(file_path):
+    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path]
     try:
-        audio = mutagen.File(file_path)
-        return float(audio.info.length)
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        dur = res.stdout.strip()
+        print(f"DEBUG: ffprobe extracted duration '{dur}' for file {file_path}")
+        if dur and dur != 'N/A':
+            return float(dur)
     except Exception as e:
-        print(f"Error reading audio duration: {e}")
-        return 0.0
+        print(f"DEBUG: ffprobe failed for {file_path}: {e}")
+    return 0.0
 
 def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
     cmd = ["ffmpeg", "-y"]
@@ -73,14 +77,21 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     
     total_audio_dur = 0.0
     if voice_path:
-        total_audio_dur = max(total_audio_dur, get_duration(voice_path))
+        dur = get_duration(voice_path)
+        print(f"DEBUG: Voice duration: {dur}")
+        total_audio_dur = max(total_audio_dur, dur)
     if music_path:
-        total_audio_dur = max(total_audio_dur, get_duration(music_path))
+        dur = get_duration(music_path)
+        print(f"DEBUG: Music duration: {dur}")
+        total_audio_dur = max(total_audio_dur, dur)
         
+    print(f"DEBUG: Total audio duration calculated: {total_audio_dur}")
     img_dur = 3.0
     if total_audio_dur > 0 and n > 0:
         img_dur = (total_audio_dur / n) + 0.1
         img_dur = max(2.0, img_dur) 
+    
+    print(f"DEBUG: Assigned image duration: {img_dur}")
         
     for p in paths:
         ext = os.path.splitext(p)[1].lower()
