@@ -104,8 +104,8 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     for i in range(n):
         if template == "fade":
             base = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-            zoom = f"zoompan=z='min(zoom+0.003,1.5)':d={int(img_dur*30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30"
-            filters.append(f"[{i}:v]{base},{zoom},format=yuv420p,setsar=1[v{i}]")
+            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
+            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
         elif template == "slideshow":
             base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
             fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
