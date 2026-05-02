@@ -210,9 +210,14 @@ export default function Dashboard({ user }) {
                   </div>
                 </div>
                 {status !== "generating" && (
-                  <div className="fixed bottom-10 right-10 z-50">
+                  <div className="fixed bottom-10 right-10 z-50 flex gap-4">
+                    {status === "done" && videoUrl && (
+                      <a href={videoUrl} download={`${name.replace(/ /g, "_")}.mp4`} className="bg-[#007AFF] text-white px-8 py-4 rounded-full font-black uppercase tracking-widest text-sm flex items-center gap-3 shadow-[0_0_30px_rgba(0,122,255,0.4)] hover:scale-105 active:scale-95 transition-all">
+                        <span className="material-symbols-outlined">download</span> Save Video
+                      </a>
+                    )}
                     <button onClick={handleGenerate} className="bg-[#2ae500] text-[#053900] px-8 py-4 rounded-full font-black uppercase tracking-widest text-sm flex items-center gap-3 shadow-[0_0_30px_rgba(42,229,0,0.4)] hover:scale-105 active:scale-95 transition-all">
-                      <span className="material-symbols-outlined">auto_fix_high</span> Create Collage
+                      <span className="material-symbols-outlined">{status === "done" ? "refresh" : "auto_fix_high"}</span> {status === "done" ? "Regenerate" : "Create Collage"}
                     </button>
                   </div>
                 )}

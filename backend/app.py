@@ -1,4 +1,4 @@
-import os, subprocess, tempfile, shutil
+import os, subprocess, tempfile, shutil, json
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -58,16 +58,36 @@ def render():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+def get_duration(file_path):
+    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        data = json.loads(res.stdout)
+        return float(data['format']['duration'])
+    except Exception:
+        return 0.0
+
 def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
     cmd = ["ffmpeg", "-y"]
     n = len(paths)
     
+    total_audio_dur = 0.0
+    if voice_path:
+        total_audio_dur = max(total_audio_dur, get_duration(voice_path))
+    if music_path:
+        total_audio_dur = max(total_audio_dur, get_duration(music_path))
+        
+    img_dur = 3.0
+    if total_audio_dur > 0 and n > 0:
+        img_dur = (total_audio_dur / n) + 0.1
+        img_dur = max(2.0, img_dur) 
+        
     for p in paths:
         ext = os.path.splitext(p)[1].lower()
         if ext in (".jpg", ".jpeg", ".png", ".webp", ".bmp"):
-            cmd += ["-loop", "1", "-t", "3", "-i", p]
+            cmd += ["-loop", "1", "-t", str(img_dur), "-i", p]
         else:
-            cmd += ["-t", "10", "-i", p]
+            cmd += ["-t", str(img_dur), "-i", p]
             
     audio_idx_voice = -1
     audio_idx_music = -1
@@ -83,9 +103,15 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     filters = []
     for i in range(n):
         if template == "fade":
-            filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fade=t=out:st=2.5:d=0.5,format=yuv420p,setsar=1,fps=30[v{i}]")
+            base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+            zoom = f"zoompan=z='min(zoom+0.001,1.5)':d={int(img_dur*30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30"
+            filters.append(f"[{i}:v]{base},{zoom},format=yuv420p,setsar=1[v{i}]")
+        elif template == "slideshow":
+            base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
+            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
+            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
         elif template == "pip" and i > 0:
-            filters.append(f"[{i}:v]scale=320:-1[pip{i}]")
+            filters.append(f"[{i}:v]scale=320:-1,format=yuv420p,setsar=1,fps=30[pip{i}]")
         else:
             filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30[v{i}]")
 
