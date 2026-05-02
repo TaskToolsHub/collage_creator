@@ -1,6 +1,7 @@
 import os, subprocess, tempfile, shutil, json
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
+import mutagen
 
 app = Flask(__name__)
 CORS(app)
@@ -59,12 +60,11 @@ def render():
         shutil.rmtree(tmp, ignore_errors=True)
 
 def get_duration(file_path):
-    cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        data = json.loads(res.stdout)
-        return float(data['format']['duration'])
-    except Exception:
+        audio = mutagen.File(file_path)
+        return float(audio.info.length)
+    except Exception as e:
+        print(f"Error reading audio duration: {e}")
         return 0.0
 
 def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
@@ -103,8 +103,8 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     filters = []
     for i in range(n):
         if template == "fade":
-            base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
-            zoom = f"zoompan=z='min(zoom+0.001,1.5)':d={int(img_dur*30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30"
+            base = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
+            zoom = f"zoompan=z='min(zoom+0.003,1.5)':d={int(img_dur*30)}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s={w}x{h}:fps=30"
             filters.append(f"[{i}:v]{base},{zoom},format=yuv420p,setsar=1[v{i}]")
         elif template == "slideshow":
             base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
