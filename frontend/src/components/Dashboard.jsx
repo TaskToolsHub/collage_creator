@@ -4,19 +4,18 @@ import { collection, addDoc, getDocs, deleteDoc, doc, query, where, serverTimest
 import { signOut } from "firebase/auth";
 
 const MODELS = [
-  { id: "sequence", name: "Sequence", icon: "movie" },
-  { id: "slideshow", name: "Slideshow", icon: "slideshow" },
+  { id: "social", name: "Social Masterpiece", icon: "stars" },
   { id: "fade", name: "Cinematic Fade", icon: "animation" },
   { id: "panning", name: "Pan & Zoom Pro", icon: "explore" },
   { id: "vertical", name: "Vertical (9:16)", icon: "smartphone" },
-  { id: "pip", name: "Picture in Picture", icon: "picture_in_picture" }
+  { id: "sequence", name: "Sequence", icon: "movie" }
 ];
 
 export default function Dashboard({ user }) {
   const [tab, setTab] = useState("studio");
   const [history, setHistory] = useState([]);
   const [name, setName] = useState("My Project");
-  const [template, setTemplate] = useState("fade");
+  const [template, setTemplate] = useState("social");
   const [files, setFiles] = useState([]);
   const [audioVoice, setAudioVoice] = useState(null);
   const [audioMusic, setAudioMusic] = useState(null);

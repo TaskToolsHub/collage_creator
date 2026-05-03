@@ -114,27 +114,40 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     filters = []
     for i in range(n):
         d_frames = int(img_dur * 30)
-        if template == "fade":
-            # Static slight zoom (1.1x) instead of animated to save CPU
-            base = f"scale={w*1.1}:{h*1.1}:force_original_aspect_ratio=increase,crop={w}:{h}"
-            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
-            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
-        elif template == "panning":
-            # Static alternate positions to simulate panning without CPU load
-            if i % 4 == 0: # Center
-                base = f"scale={w*1.2}:{h*1.2}:force_original_aspect_ratio=increase,crop={w}:{h}"
-            elif i % 4 == 1: # Top
-                base = f"scale={w*1.2}:{h*1.2}:force_original_aspect_ratio=increase,crop={w}:{h}:(iw-ow)/2:0"
-            elif i % 4 == 2: # Bottom
-                base = f"scale={w*1.2}:{h*1.2}:force_original_aspect_ratio=increase,crop={w}:{h}:(iw-ow)/2:(ih-oh)"
-            else: # Left
-                base = f"scale={w*1.2}:{h*1.2}:force_original_aspect_ratio=increase,crop={w}:{h}:0:(ih-oh)/2"
-            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
-            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
-        elif template == "slideshow" or template == "vertical":
-            base = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
-            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
-            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
+        # Base logic for blurred background (common for social and vertical)
+        if template in ["social", "vertical", "panning", "fade"]:
+            # BG: Scale to fill, blur, and darken
+            bg = f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur=20:10[bg{i}]"
+            # FG: Scale to fit without cutting
+            fg = f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease[fg{i}]"
+            
+            # Movement logic
+            if template == "social" or template == "vertical":
+                move = i % 4
+                if move == 0: # Slide from Left
+                    # Enter from left in 1 sec, then stay center
+                    x_expr = f"if(lte(t,1), -{w}+(t*{w})+(main_w-w)/2, (main_w-w)/2)"
+                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2[v{i}]"
+                elif move == 1: # Slide from Top
+                    y_expr = f"if(lte(t,1), -{h}+(t*{h})+(main_h-h)/2, (main_h-h)/2)"
+                    ov = f"[bg{i}][fg{i}]overlay=x=(main_w-w)/2:y='{y_expr}'[v{i}]"
+                elif move == 2: # Rotate In
+                    # Rotate 360 degrees in 1 sec
+                    rot = f"[fg{i}]rotate=a='if(lte(t,1), 2*PI*(1-t), 0)':c=black@0[rot{i}]"
+                    bg += ";" + rot
+                    ov = f"[bg{i}][rot{i}]overlay=(main_w-w)/2:(main_h-h)/2[v{i}]"
+                else: # Slide from Right
+                    x_expr = f"if(lte(t,1), {w}-(t*{w})+(main_w-w)/2, (main_w-w)/2)"
+                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2[v{i}]"
+                
+                filters.append(f"{bg};{fg};{ov}")
+            else:
+                # Fallback for other templates
+                ov = f"[bg{i}][fg{i}]overlay=(main_w-w)/2:(main_h-h)/2[v{i}]"
+                filters.append(f"{bg};{fg};{ov}")
+        else:
+            # Simple sequence
+            filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},format=yuv420p,setsar=1,fps=30[v{i}]")
 
     if template == "pip":
         if n > 1:
