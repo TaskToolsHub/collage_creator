@@ -64,11 +64,11 @@ def get_duration(file_path):
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         dur = res.stdout.strip()
-        print(f"DEBUG: ffprobe extracted duration '{dur}' for file {file_path}")
+        print(f"DEBUG: ffprobe extracted duration '{dur}' for file {file_path}", flush=True)
         if dur and dur != 'N/A':
             return float(dur)
     except Exception as e:
-        print(f"DEBUG: ffprobe failed for {file_path}: {e}")
+        print(f"DEBUG: ffprobe failed for {file_path}: {e}", flush=True)
     return 0.0
 
 def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
@@ -78,20 +78,20 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
     total_audio_dur = 0.0
     if voice_path:
         dur = get_duration(voice_path)
-        print(f"DEBUG: Voice duration: {dur}")
+        print(f"DEBUG: Voice duration: {dur}", flush=True)
         total_audio_dur = max(total_audio_dur, dur)
     if music_path:
         dur = get_duration(music_path)
-        print(f"DEBUG: Music duration: {dur}")
+        print(f"DEBUG: Music duration: {dur}", flush=True)
         total_audio_dur = max(total_audio_dur, dur)
         
-    print(f"DEBUG: Total audio duration calculated: {total_audio_dur}")
+    print(f"DEBUG: Total audio duration calculated: {total_audio_dur}", flush=True)
     img_dur = 3.0
     if total_audio_dur > 0 and n > 0:
         img_dur = (total_audio_dur / n) + 0.1
         img_dur = max(2.0, img_dur) 
     
-    print(f"DEBUG: Assigned image duration: {img_dur}")
+    print(f"DEBUG: Assigned image duration: {img_dur}", flush=True)
         
     for p in paths:
         ext = os.path.splitext(p)[1].lower()
