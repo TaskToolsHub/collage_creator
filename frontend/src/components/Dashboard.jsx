@@ -7,6 +7,7 @@ const MODELS = [
   { id: "sequence", name: "Sequence", icon: "movie" },
   { id: "slideshow", name: "Slideshow", icon: "slideshow" },
   { id: "fade", name: "Cinematic Fade", icon: "animation" },
+  { id: "panning", name: "Pan & Zoom Pro", icon: "explore" },
   { id: "vertical", name: "Vertical (9:16)", icon: "smartphone" },
   { id: "pip", name: "Picture in Picture", icon: "picture_in_picture" }
 ];

@@ -106,25 +106,37 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
         cmd += ["-i", voice_path]
         audio_idx_voice = n
     if music_path:
-        cmd += ["-i", music_path]
+        cmd += ["-stream_loop", "-1", "-i", music_path]
         audio_idx_music = n + (1 if voice_path else 0)
 
     w, h = (480, 854) if template == "vertical" else (854, 480)
     
     filters = []
     for i in range(n):
+        d_frames = int(img_dur * 30)
         if template == "fade":
+            # Zoom-out effect: start slightly zoomed in and move out
+            base = f"scale={w*2}:{h*2}:force_original_aspect_ratio=increase,crop={w*2}:{h*2}"
+            zoom = f"zoompan=z='1.1-0.0005*on':d={d_frames}:s={w}x{h}:fps=30"
+            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
+            filters.append(f"[{i}:v]{base},{zoom},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
+        elif template == "panning":
+            # Alternating pan effects
+            base = f"scale={w*2}:{h*2}:force_original_aspect_ratio=increase,crop={w*2}:{h*2}"
+            if i % 4 == 0: # Left to Right
+                pan = f"zoompan=z=1.2:x='(on/{d_frames})*(iw-iw/zoom)':y='ih/2-ih/zoom/2':d={d_frames}:s={w}x{h}:fps=30"
+            elif i % 4 == 1: # Top to Bottom
+                pan = f"zoompan=z=1.2:x='iw/2-iw/zoom/2':y='(on/{d_frames})*(ih-ih/zoom)':d={d_frames}:s={w}x{h}:fps=30"
+            elif i % 4 == 2: # Right to Left
+                pan = f"zoompan=z=1.2:x='(1-on/{d_frames})*(iw-iw/zoom)':y='ih/2-ih/zoom/2':d={d_frames}:s={w}x{h}:fps=30"
+            else: # Bottom to Top
+                pan = f"zoompan=z=1.2:x='iw/2-iw/zoom/2':y='(1-on/{d_frames})*(ih-ih/zoom)':d={d_frames}:s={w}x{h}:fps=30"
+            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
+            filters.append(f"[{i}:v]{base},{pan},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
+        elif template == "slideshow" or template == "vertical":
             base = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
             fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
             filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
-        elif template == "slideshow":
-            base = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
-            fade = f"fade=t=in:st=0:d=1,fade=t=out:st={img_dur-1}:d=1"
-            filters.append(f"[{i}:v]{base},{fade},format=yuv420p,setsar=1,fps=30[v{i}]")
-        elif template == "pip" and i > 0:
-            filters.append(f"[{i}:v]scale=320:-1,format=yuv420p,setsar=1,fps=30[pip{i}]")
-        else:
-            filters.append(f"[{i}:v]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p,setsar=1,fps=30[v{i}]")
 
     if template == "pip":
         if n > 1:
