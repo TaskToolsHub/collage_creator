@@ -47,13 +47,13 @@ def render():
         cmd = _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output)
         print(f"FFmpeg V4: {' '.join(cmd)}")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode != 0:
             return jsonify({"error": "FFmpeg failed", "detail": result.stderr[-500:]}), 500
 
         return send_file(output, mimetype="video/mp4", as_attachment=True, download_name=f"{project_name.replace(' ','_')}.mp4")
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "Timeout >5min"}), 504
+        return jsonify({"error": "Timeout >10min - Il video è troppo lungo per il server gratuito"}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
     finally:
@@ -109,7 +109,7 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
         cmd += ["-i", music_path]
         audio_idx_music = n + (1 if voice_path else 0)
 
-    w, h = (720, 1280) if template == "vertical" else (1280, 720)
+    w, h = (480, 854) if template == "vertical" else (854, 480)
     
     filters = []
     for i in range(n):
