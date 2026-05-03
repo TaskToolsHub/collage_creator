@@ -127,23 +127,23 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
                 if move == 0: # Slide from Left
                     # Enter from left in 1 sec, then stay center
                     x_expr = f"if(lte(t,1), -{w}+(t*{w})+(main_w-w)/2, (main_w-w)/2)"
-                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2[v{i}]"
+                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2,setsar=1[v{i}]"
                 elif move == 1: # Slide from Top
                     y_expr = f"if(lte(t,1), -{h}+(t*{h})+(main_h-h)/2, (main_h-h)/2)"
-                    ov = f"[bg{i}][fg{i}]overlay=x=(main_w-w)/2:y='{y_expr}'[v{i}]"
+                    ov = f"[bg{i}][fg{i}]overlay=x=(main_w-w)/2:y='{y_expr}',setsar=1[v{i}]"
                 elif move == 2: # Rotate In
                     # Rotate 360 degrees in 1 sec
                     rot = f"[fg{i}]rotate=a='if(lte(t,1), 2*PI*(1-t), 0)':c=black@0[rot{i}]"
                     bg += ";" + rot
-                    ov = f"[bg{i}][rot{i}]overlay=(main_w-w)/2:(main_h-h)/2[v{i}]"
+                    ov = f"[bg{i}][rot{i}]overlay=(main_w-w)/2:(main_h-h)/2,setsar=1[v{i}]"
                 else: # Slide from Right
                     x_expr = f"if(lte(t,1), {w}-(t*{w})+(main_w-w)/2, (main_w-w)/2)"
-                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2[v{i}]"
+                    ov = f"[bg{i}][fg{i}]overlay=x='{x_expr}':y=(main_h-h)/2,setsar=1[v{i}]"
                 
                 filters.append(f"{bg};{fg};{ov}")
             else:
                 # Fallback for other templates
-                ov = f"[bg{i}][fg{i}]overlay=(main_w-w)/2:(main_h-h)/2[v{i}]"
+                ov = f"[bg{i}][fg{i}]overlay=(main_w-w)/2:(main_h-h)/2,setsar=1[v{i}]"
                 filters.append(f"{bg};{fg};{ov}")
         else:
             # Simple sequence

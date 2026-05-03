@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect } // v8.1-sync-fix from "react";
 import { db, auth, RENDER_API_URL } from "../utils/firebase";
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, serverTimestamp } from "firebase/firestore";
 import { signOut } from "firebase/auth";
