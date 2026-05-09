@@ -1,38 +1,96 @@
-import { useState, useEffect } from "react"; // v8.1-sync-fix
+import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, RENDER_API_URL } from "../utils/firebase";
-import { collection, addDoc, getDocs, deleteDoc, doc, query, where, serverTimestamp } from "firebase/firestore";
+import { 
+  collection, 
+  addDoc, 
+  getDocs, 
+  deleteDoc, 
+  doc, 
+  query, 
+  where, 
+  updateDoc,
+  serverTimestamp 
+} from "firebase/firestore";
 import { signOut } from "firebase/auth";
+import {
+  Clapperboard,
+  History,
+  Search,
+  Trash2,
+  Play,
+  Pencil,
+  Check,
+  X,
+  Plus,
+  Video,
+  UploadCloud,
+  Music,
+  Mic,
+  Settings,
+  Sparkles,
+  Smartphone,
+  Navigation,
+  Film,
+  Server,
+  Loader2,
+  Logout
+} from 'lucide-react';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
 
 const MODELS = [
-  { id: "social", name: "Social Masterpiece", icon: "stars" },
-  { id: "fade", name: "Cinematic Fade", icon: "animation" },
-  { id: "panning", name: "Pan & Zoom Pro", icon: "explore" },
-  { id: "vertical", name: "Vertical (9:16)", icon: "smartphone" },
-  { id: "sequence", name: "Sequence", icon: "movie" }
+  { id: "social", name: "Social Masterpiece", icon: Sparkles },
+  { id: "fade", name: "Cinematic Fade", icon: Film },
+  { id: "panning", name: "Pan & Zoom Pro", icon: Navigation },
+  { id: "vertical", name: "Vertical (9:16)", icon: Smartphone },
+  { id: "sequence", name: "Sequence", icon: Clapperboard }
 ];
 
 export default function Dashboard({ user }) {
-  const [tab, setTab] = useState("studio");
-  const [history, setHistory] = useState([]);
-  const [name, setName] = useState("My Project");
-  const [template, setTemplate] = useState("social");
-  const [files, setFiles] = useState([]);
-  const [audioVoice, setAudioVoice] = useState(null);
-  const [audioMusic, setAudioMusic] = useState(null);
-  const [voiceVol, setVoiceVol] = useState(100);
-  const [musicVol, setMusicVol] = useState(20);
-  const [status, setStatus] = useState(null);
+  const [activeTab, setActiveTab] = useState('studio');
+  const [projects, setProjects] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // History tab state
+  const [editingId, setEditingId] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editLink, setEditLink] = useState('');
+  const [playingId, setPlayingId] = useState(null);
+
+  // Studio tab state
+  const [template, setTemplate] = useState('social');
+  const [projectName, setProjectName] = useState('New Project');
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [voiceFile, setVoiceFile] = useState(null);
+  const [musicFile, setMusicFile] = useState(null);
+  const [voiceVolume, setVoiceVolume] = useState(1.0);
+  const [musicVolume, setMusicVolume] = useState(0.2);
+
+  // Connection and Generation state
+  const [backendUrl, setBackendUrl] = useState(() => localStorage.getItem('backendUrl') || RENDER_API_URL + '/render');
+  const [isGenerating, setIsGenerating] = useState(false);
   const [videoUrl, setVideoUrl] = useState(null);
-  const [errorMsg, setErrorMsg] = useState("");
-  const [dragging, setDragging] = useState(false);
 
-  useEffect(() => { loadHistory(); }, [user, tab]);
+  useEffect(() => {
+    localStorage.setItem('backendUrl', backendUrl);
+  }, [backendUrl]);
 
-  async function loadHistory() {
+  useEffect(() => {
+    loadHistory();
+  }, [user, activeTab]);
+
+  const loadHistory = async () => {
     try {
       const q = query(collection(db, "projects"), where("uid", "==", user.uid));
       const snap = await getDocs(q);
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      
+      // Auto-delete older than 7 days
       const now = Date.now();
       const WEEK = 7*24*60*60*1000;
       const valid = [];
@@ -44,214 +102,507 @@ export default function Dashboard({ user }) {
         }
       }
       valid.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
-      setHistory(valid);
-    } catch (e) { console.error("History load error:", e); }
-  }
+      setProjects(valid);
+    } catch (e) {
+      console.error("History load error:", e);
+    }
+  };
 
-  function handleDrop(e) {
-    e.preventDefault(); setDragging(false);
-    const dropped = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/") || f.type.startsWith("video/"));
-    setFiles(prev => [...prev, ...dropped]);
-  }
+  const filteredProjects = useMemo(() => {
+    return projects.filter(p => 
+      (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.description || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (p.referenceLink || '').toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [projects, searchTerm]);
 
-  function removeFile(idx) { setFiles(prev => prev.filter((_, i) => i !== idx)); }
+  const handleDelete = async (id) => {
+    if (confirm('Are you sure you want to delete this video?')) {
+      try {
+        await deleteDoc(doc(db, "projects", id));
+        setProjects(projects.filter(p => p.id !== id));
+        if (playingId === id) setPlayingId(null);
+      } catch (e) {
+        alert("Error deleting project.");
+      }
+    }
+  };
 
-  async function handleGenerate() {
-    if (!name.trim()) { alert("Enter a project name."); return; }
-    if (!files.length) { alert("Add at least one media file."); return; }
-    setStatus("generating"); setVideoUrl(null); setErrorMsg("");
+  const startEditing = (project) => {
+    setEditingId(project.id);
+    setEditTitle(project.name);
+    setEditDescription(project.description || '');
+    setEditLink(project.referenceLink || '');
+  };
+
+  const saveEditing = async (id) => {
     try {
-      const fd = new FormData();
-      fd.append("projectName", name.trim());
-      fd.append("template", template);
-      fd.append("uid", user.uid);
-      fd.append("voiceVolume", voiceVol / 100);
-      fd.append("musicVolume", musicVol / 100);
-      files.forEach(f => fd.append("media", f));
-      if (audioVoice) fd.append("voice", audioVoice);
-      if (audioMusic) fd.append("music", audioMusic);
+      await updateDoc(doc(db, "projects", id), {
+        name: editTitle,
+        description: editDescription,
+        referenceLink: editLink
+      });
+      setProjects(projects.map(p => 
+        p.id === id 
+          ? { ...p, name: editTitle, description: editDescription, referenceLink: editLink } 
+          : p
+      ));
+      setEditingId(null);
+    } catch (e) {
+      alert("Error updating project.");
+    }
+  };
 
-      const res = await fetch(RENDER_API_URL + "/render", { method: "POST", body: fd });
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob();
-      setVideoUrl(URL.createObjectURL(blob));
-      setStatus("done");
+  const handleMediaUpload = (e) => {
+    if (e.target.files) {
+      setMediaFiles(prev => [...prev, ...Array.from(e.target.files)]);
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (mediaFiles.length === 0) return;
+    if (!backendUrl) {
+      alert("Please configure the Backend URL first.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setVideoUrl(null);
+    try {
+      const formData = new FormData();
+      formData.append("projectName", projectName);
+      formData.append("template", template);
+      formData.append("uid", user.uid);
+      formData.append("voiceVolume", voiceVolume.toString());
+      formData.append("musicVolume", musicVolume.toString());
+      
+      mediaFiles.forEach(file => formData.append("media", file));
+      if (voiceFile) formData.append("voice", voiceFile);
+      if (musicFile) formData.append("music", musicFile);
+
+      const response = await fetch(backendUrl, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Server error (${response.status}): ${errorText}`);
+      }
+
+      const blob = await response.blob();
+      const generatedUrl = URL.createObjectURL(blob);
+      setVideoUrl(generatedUrl);
       
       await addDoc(collection(db, "projects"), {
-        uid: user.uid, name: name.trim(), template, mediaCount: files.length,
-        hasVoice: !!audioVoice, hasMusic: !!audioMusic, createdAt: serverTimestamp()
+        uid: user.uid,
+        name: projectName,
+        template: template.toUpperCase(),
+        mediaCount: mediaFiles.length,
+        status: 'SAVED',
+        description: '',
+        referenceLink: '',
+        createdAt: serverTimestamp()
       });
+      
       loadHistory();
-    } catch (e) { console.error(e); setStatus("error"); setErrorMsg(e.message); }
-  }
+      setActiveTab('studio'); // Keep user on studio to watch the video
+      
+    } catch (error) {
+      console.error("Generate error:", error);
+      alert("Failed to render video. " + error.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   return (
-    <div className="bg-[#0A0A0A] text-[#e5e2e1] min-h-screen flex flex-col font-['Inter'] overflow-hidden">
-      <header className="bg-[#0A0A0A]/80 backdrop-blur-md border-b border-white/10 shadow-2xl fixed top-0 left-0 z-50 flex justify-between items-center w-full px-6 h-16">
-        <div className="flex items-center gap-8">
-          <h1 className="text-lg font-black tracking-tighter text-white uppercase">AI Video Studio</h1>
-          <div className="hidden md:flex items-center bg-white/5 border border-[#2A2A2A] rounded-lg px-3 py-1.5 gap-2 w-64">
-            <span className="material-symbols-outlined text-neutral-500 text-sm">search</span>
-            <input className="bg-transparent border-none focus:outline-none text-xs text-[#e5e2e1] placeholder-neutral-500 w-full" placeholder="Search assets..." />
-          </div>
+    <div className="flex h-screen bg-[#0E0E0E] text-white font-sans overflow-hidden">
+      {/* Sidebar */}
+      <div className="w-64 bg-[#141414] border-r border-[#2A2A2A] flex flex-col flex-shrink-0 relative z-20">
+        <div className="p-6 h-20 flex items-center">
+          <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+             AI VIDEO STUDIO
+          </h1>
         </div>
-        <div className="flex items-center gap-4">
-          <input type="text" value={name} onChange={e=>setName(e.target.value)} className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs outline-none focus:border-[#007AFF]" placeholder="Project Name" />
-          <button className="text-white bg-[#007AFF] px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-600 transition-colors active:scale-95 duration-200" onClick={() => signOut(auth)}>Logout</button>
+
+        <div className="px-6 py-4">
+          <h2 className="text-[10px] font-bold text-gray-400 tracking-wider mb-1 uppercase">Studio Workspace</h2>
+          <span className="text-[10px] font-bold text-blue-500 tracking-widest uppercase">Pro Plan</span>
         </div>
-      </header>
 
-      <div className="flex pt-16 h-screen">
-        <aside className="bg-[#121212] border-r border-white/10 fixed left-0 top-16 h-full flex flex-col py-6 w-64 z-40">
-          <div className="px-6 mb-10 flex flex-col gap-1">
-            <span className="text-white font-bold uppercase text-xs tracking-widest">Studio Workspace</span>
-            <span className="text-[10px] text-[#007AFF] font-bold uppercase tracking-widest">Pro Plan</span>
+        <nav className="mt-4 flex-1">
+          <ul>
+            <li>
+              <button 
+                onClick={() => setActiveTab('studio')}
+                className={cn(
+                  "w-full flex items-center gap-3 px-6 py-3 text-sm font-medium transition-colors",
+                  activeTab === 'studio' 
+                    ? "bg-[#1C2532] text-blue-400 border-r-2 border-blue-500" 
+                    : "text-gray-400 hover:text-white hover:bg-[#1A1A1A]"
+                )}
+              >
+                <Clapperboard size={18} />
+                STUDIO
+              </button>
+            </li>
+            <li>
+              <button 
+                onClick={() => setActiveTab('history')}
+                className={cn(
+                  "w-full flex items-center gap-3 px-6 py-3 text-sm font-medium transition-colors",
+                  activeTab === 'history' 
+                    ? "bg-[#1C2532] text-blue-400 border-r-2 border-blue-500" 
+                    : "text-gray-400 hover:text-white hover:bg-[#1A1A1A]"
+                )}
+              >
+                <History size={18} />
+                HISTORY
+              </button>
+            </li>
+          </ul>
+        </nav>
+        
+        <div className="p-4 border-t border-[#2A2A2A]">
+           <button onClick={() => signOut(auth)} className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-gray-500 hover:text-white transition-colors">
+             <Logout size={16} /> LOGOUT
+           </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col relative z-10 overflow-hidden">
+        {/* Top Header */}
+        <header className="h-20 border-b border-[#2A2A2A] bg-[#0E0E0E] flex items-center px-8 z-20">
+          <div className="relative w-96">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+            <input 
+              type="text" 
+              placeholder="Search assets (projects, descriptions)..." 
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                if (activeTab !== 'history') setActiveTab('history');
+              }}
+              className="w-full bg-[#1A1A1A] border border-[#333] text-sm text-white rounded-md py-2.5 pl-10 pr-4 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors"
+            />
           </div>
-          <nav className="flex-1 flex flex-col gap-2">
-            <button onClick={() => setTab("studio")} className={`flex items-center gap-3 px-4 py-3 uppercase text-xs font-bold tracking-widest transition-all ${tab === "studio" ? "bg-[#007AFF]/10 text-[#007AFF] border-r-4 border-[#007AFF]" : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"}`}>
-              <span className="material-symbols-outlined">movie_filter</span> Studio
-            </button>
-            <button onClick={() => setTab("history")} className={`flex items-center gap-3 px-4 py-3 uppercase text-xs font-bold tracking-widest transition-all ${tab === "history" ? "bg-[#007AFF]/10 text-[#007AFF] border-r-4 border-[#007AFF]" : "text-neutral-500 hover:bg-white/5 hover:text-neutral-200"}`}>
-              <span className="material-symbols-outlined">history</span> History
-            </button>
-          </nav>
-        </aside>
+        </header>
 
-        <main className="ml-64 flex-1 p-6 bg-[#0A0A0A] overflow-y-auto pb-32">
-          {tab === "studio" && (
-            <div className="grid grid-cols-12 gap-6 h-full">
-              <div className="col-span-12 lg:col-span-5 flex flex-col gap-6">
-                <section className="glass-panel p-6 rounded-xl flex flex-col gap-6 border border-white/10 bg-[#1E1E1E]/60">
-                  <div className="flex items-center justify-between">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[#007AFF]">graphic_eq</span> Audio Mixing
-                    </h2>
-                    <span className="text-[10px] bg-[#2A2A2A] px-2 py-0.5 rounded text-neutral-400">48KHZ / 24-BIT</span>
-                  </div>
-                  <div className="flex flex-col gap-6">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="flex flex-col gap-2 relative">
-                        <input type="file" accept="audio/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => setAudioVoice(e.target.files[0])} />
-                        <div className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed transition-all ${audioVoice ? 'border-[#007AFF] bg-[#007AFF]/10' : 'border-white/10 hover:border-[#007AFF]/50'}`}>
-                          <span className="material-symbols-outlined text-[#007AFF]">{audioVoice ? 'check_circle' : 'mic'}</span>
-                          <span className="text-xs text-neutral-400">{audioVoice ? audioVoice.name.substring(0,10)+'...' : 'Upload Voice'}</span>
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-2 relative">
-                        <input type="file" accept="audio/*" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => setAudioMusic(e.target.files[0])} />
-                        <div className={`flex flex-col items-center justify-center gap-2 p-4 rounded-xl border-2 border-dashed transition-all ${audioMusic ? 'border-[#2ae500] bg-[#2ae500]/10' : 'border-white/10 hover:border-[#2ae500]/50'}`}>
-                          <span className="material-symbols-outlined text-[#2ae500]">{audioMusic ? 'check_circle' : 'music_note'}</span>
-                          <span className="text-xs text-neutral-400">{audioMusic ? audioMusic.name.substring(0,10)+'...' : 'Upload Music'}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-4">
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1 font-bold">
-                          <span className="text-neutral-500 uppercase tracking-widest">Voice Volume</span>
-                          <span className="text-[#007AFF]">{voiceVol}%</span>
-                        </div>
-                        <input type="range" className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#007AFF]" value={voiceVol} onChange={e=>setVoiceVol(e.target.value)} />
-                      </div>
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1 font-bold">
-                          <span className="text-neutral-500 uppercase tracking-widest">Music Volume</span>
-                          <span className="text-[#2ae500]">{musicVol}%</span>
-                        </div>
-                        <input type="range" className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#2ae500]" value={musicVol} onChange={e=>setMusicVol(e.target.value)} />
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="glass-panel p-6 rounded-xl flex flex-col gap-4 border border-white/10 bg-[#1E1E1E]/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                      <span className="material-symbols-outlined text-[#2ae500]">auto_videocam</span> Motion Models
-                    </h2>
-                    <select className="bg-[#1A1A1A] border border-white/10 text-white text-xs rounded px-3 py-2 outline-none focus:border-[#007AFF]" value={template} onChange={e => setTemplate(e.target.value)}>
-                      {MODELS.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                    </select>
-                  </div>
-                  
-                  <div 
-                    className={`flex flex-col items-center justify-center p-8 rounded-xl border-2 border-dashed transition-all cursor-pointer ${dragging ? 'border-[#007AFF] bg-[#007AFF]/10' : 'border-white/10 bg-[#1A1A1A] hover:border-white/30'}`}
-                    onDragOver={e => { e.preventDefault(); setDragging(true); }}
-                    onDragLeave={() => setDragging(false)}
-                    onDrop={handleDrop}
-                    onClick={() => document.getElementById('mediaInput').click()}
-                  >
-                    <span className="material-symbols-outlined text-4xl text-neutral-500 mb-2">add_photo_alternate</span>
-                    <span className="text-sm font-bold text-neutral-300">Drag & Drop Media</span>
-                    <span className="text-xs text-neutral-500 mt-1">or click to browse</span>
-                    <input id="mediaInput" type="file" multiple accept="image/*,video/*" className="hidden" onChange={e => setFiles([...files, ...Array.from(e.target.files)])} />
-                  </div>
-
-                  {files.length > 0 && (
-                    <div className="flex gap-2 overflow-x-auto py-2">
-                      {files.map((f, i) => (
-                        <div key={i} className="relative w-20 h-20 shrink-0 rounded-lg overflow-hidden border border-white/20 shadow-lg">
-                          {f.type.startsWith('video') ? <div className="w-full h-full bg-[#2A2A2A] flex items-center justify-center text-white font-bold text-xl">V</div> : <img src={URL.createObjectURL(f)} className="w-full h-full object-cover" />}
-                          <button onClick={(e) => {e.stopPropagation(); removeFile(i)}} className="absolute top-1 right-1 bg-red-600/90 hover:bg-red-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold">X</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-              </div>
-
-              <div className="col-span-12 lg:col-span-7 flex flex-col">
-                <div className="glass-panel flex-1 rounded-xl relative overflow-hidden bg-black flex items-center justify-center border border-[#2A2A2A]">
-                  <div className={`relative ${template === 'vertical' ? 'h-[90%] aspect-[9/16]' : 'w-[90%] aspect-video'} bg-[#0A0A0A] shadow-[0_0_50px_rgba(0,0,0,1)] rounded-lg overflow-hidden flex items-center justify-center`}>
-                    {status === "generating" && <div className="flex flex-col items-center text-[#007AFF]"><span className="material-symbols-outlined text-5xl animate-spin mb-4">sync</span><span className="font-bold text-sm tracking-widest uppercase animate-pulse">Rendering UltraFast...</span></div>}
-                    {status === "error" && <div className="text-red-500 text-sm p-4 text-center border border-red-500/50 rounded bg-red-500/10 mx-4">{errorMsg}</div>}
-                    {status === "done" && videoUrl && <video src={videoUrl} controls className="w-full h-full object-contain" autoPlay />}
-                    {!status && !videoUrl && <div className="text-neutral-600 text-sm tracking-widest uppercase flex flex-col items-center gap-2"><span className="material-symbols-outlined text-4xl">preview</span>Live Preview Ready</div>}
-                  </div>
-                </div>
-                {status !== "generating" && (
-                  <div className="fixed bottom-10 right-10 z-50 flex gap-4">
-                    {status === "done" && videoUrl && (
-                      <a href={videoUrl} download={`${name.replace(/ /g, "_")}.mp4`} className="bg-[#007AFF] text-white px-8 py-4 rounded-full font-black uppercase tracking-widest text-sm flex items-center gap-3 shadow-[0_0_30px_rgba(0,122,255,0.4)] hover:scale-105 active:scale-95 transition-all">
-                        <span className="material-symbols-outlined">download</span> Save Video
-                      </a>
-                    )}
-                    <button onClick={handleGenerate} className="bg-[#2ae500] text-[#053900] px-8 py-4 rounded-full font-black uppercase tracking-widest text-sm flex items-center gap-3 shadow-[0_0_30px_rgba(42,229,0,0.4)] hover:scale-105 active:scale-95 transition-all">
-                      <span className="material-symbols-outlined">{status === "done" ? "refresh" : "auto_fix_high"}</span> {status === "done" ? "Regenerate" : "Create Collage"}
-                    </button>
-                  </div>
+        {/* Scrollable Content Area */}
+        <main className="flex-1 overflow-y-auto p-8">
+          {activeTab === 'history' && (
+            <div className="max-w-6xl">
+              <div className="mb-8">
+                <h2 className="text-3xl font-bold mb-2">Project History</h2>
+                <p className="text-gray-400">Manage your saved video collages (auto-delete 7 days).</p>
+                {searchTerm && (
+                  <p className="text-blue-400 mt-2 text-sm">Showing results for: "{searchTerm}"</p>
                 )}
               </div>
+
+              {filteredProjects.length === 0 ? (
+                <div className="text-center py-20 text-gray-500">
+                  No projects found.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                  {filteredProjects.map((project) => (
+                    <div key={project.id} className="bg-[#18181B] rounded-xl border border-[#27272A] overflow-hidden flex flex-col group">
+                      <div className="relative aspect-[9/16] bg-black flex items-center justify-center border-b border-[#27272A]">
+                        <div className="absolute top-3 left-3 bg-green-900/30 text-green-400 text-[10px] font-bold px-2 py-1 rounded border border-green-500/20 tracking-widest">
+                          SAVED
+                        </div>
+                        
+                        {playingId === project.id ? (
+                          <div className="flex flex-col items-center gap-2 p-4 text-center">
+                            <Video size={48} className="text-blue-500 animate-pulse" />
+                            <p className="text-xs text-gray-500">Video saved locally in your dashboard after generation.</p>
+                          </div>
+                        ) : (
+                          <Clapperboard size={48} className="text-[#333] group-hover:text-[#444] transition-colors" />
+                        )}
+                      </div>
+
+                      <div className="p-4 flex flex-col flex-1">
+                        {editingId === project.id ? (
+                          <div className="space-y-3 mb-4 flex-1">
+                             <input
+                                type="text"
+                                value={editTitle}
+                                onChange={(e) => setEditTitle(e.target.value)}
+                                className="w-full bg-[#27272A] border border-[#3F3F46] rounded px-3 py-1.5 text-sm font-bold text-white focus:outline-none focus:border-blue-500"
+                                placeholder="Project Title"
+                                autoFocus
+                             />
+                             <textarea
+                                value={editDescription}
+                                onChange={(e) => setEditDescription(e.target.value)}
+                                className="w-full bg-[#27272A] border border-[#3F3F46] rounded px-3 py-1.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500 resize-none h-16"
+                                placeholder="Description (optional)"
+                             />
+                             <input
+                                type="text"
+                                value={editLink}
+                                onChange={(e) => setEditLink(e.target.value)}
+                                className="w-full bg-[#27272A] border border-[#3F3F46] rounded px-3 py-1.5 text-xs text-blue-400 focus:outline-none focus:border-blue-500"
+                                placeholder="Reference Link (optional)"
+                             />
+                             <div className="flex gap-2">
+                               <button onClick={() => saveEditing(project.id)} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-xs font-semibold flex items-center justify-center gap-1 transition-colors">
+                                 <Check size={14} /> Save
+                               </button>
+                               <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-1.5 rounded text-xs font-semibold flex items-center justify-center gap-1 transition-colors">
+                                 <X size={14} /> Cancel
+                               </button>
+                             </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex justify-between items-start mb-1 group/title">
+                              <h3 className="font-bold text-sm leading-tight truncate pr-2 uppercase tracking-tighter">{project.name}</h3>
+                              <button 
+                                onClick={() => startEditing(project)}
+                                className="text-gray-500 hover:text-white opacity-0 group-hover/title:opacity-100 transition-opacity p-1 bg-[#27272A] rounded"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
+                            
+                            <div className="flex items-center gap-2 text-[10px] text-gray-500 mb-3 font-bold uppercase tracking-widest">
+                              <span className="flex items-center gap-1 text-blue-500"><Video size={10}/> {project.template}</span>
+                              <span>•</span>
+                              <span>{project.mediaCount} MEDIA</span>
+                            </div>
+
+                            {(project.description || project.referenceLink) && (
+                              <div className="bg-[#1f1f23] rounded p-2 mb-3 text-[10px] flex-1 border border-white/5">
+                                {project.description && <p className="text-gray-400 mb-1 line-clamp-2">{project.description}</p>}
+                                {project.referenceLink && (
+                                  <a href={project.referenceLink} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-1 truncate w-full">
+                                    🔗 Link
+                                  </a>
+                                )}
+                              </div>
+                            )}
+                            
+                            {!project.description && !project.referenceLink && <div className="flex-1"></div>}
+                          </>
+                        )}
+
+                        {editingId !== project.id && (
+                          <div className="flex gap-2 mt-auto pt-3 border-t border-[#27272A]">
+                            <button 
+                              onClick={() => handleDelete(project.id)}
+                              className="w-full bg-red-950/20 border border-red-900/30 hover:bg-red-900/40 text-red-500 py-2 rounded text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
+                            >
+                              <Trash2 size={14} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {tab === "history" && (
-            <div>
-              <div className="mb-10">
-                <h1 className="text-3xl font-bold text-white mb-2 tracking-tighter">Project History</h1>
-                <p className="text-neutral-400 text-sm">Manage your saved video collages (auto-delete 7 days).</p>
+          {activeTab === 'studio' && (
+            <div className="max-w-6xl">
+              <div className="mb-8">
+                <h2 className="text-3xl font-bold mb-2 tracking-tighter">Studio Workspace</h2>
+                <p className="text-gray-400">Configure your video template, upload media, and generate your collage.</p>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                {history.map(p => (
-                  <div key={p.id} className="group flex flex-col bg-[#1c1b1b] border border-white/10 rounded-xl overflow-hidden hover:border-[#007AFF]/50 transition-all duration-300 shadow-xl">
-                    <div className="aspect-[9/16] relative bg-black flex items-center justify-center">
-                       <span className="material-symbols-outlined text-neutral-800 text-6xl group-hover:scale-110 transition-transform">movie</span>
-                       <div className="absolute top-3 left-3 px-2 py-1 bg-[#2ae500]/20 backdrop-blur-md rounded text-[10px] font-bold text-[#2ae500] tracking-widest flex items-center gap-1 border border-[#2ae500]/20">SAVED</div>
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+                 {/* Left Column: Media & Template */}
+                 <div className="md:col-span-8 space-y-6">
+                    {/* Preview Area */}
+                    <div className="bg-black rounded-xl border border-[#27272A] aspect-video relative overflow-hidden flex items-center justify-center shadow-2xl">
+                       {isGenerating ? (
+                         <div className="flex flex-col items-center gap-4">
+                           <Loader2 size={48} className="text-blue-500 animate-spin" />
+                           <p className="text-sm font-bold text-blue-400 animate-pulse tracking-widest uppercase">Rendering UltraFast...</p>
+                         </div>
+                       ) : videoUrl ? (
+                         <video src={videoUrl} controls autoPlay className="w-full h-full object-contain" />
+                       ) : (
+                         <div className="text-center">
+                            <Play size={48} className="mx-auto text-[#1A1A1A] mb-4" />
+                            <p className="text-xs text-gray-600 font-bold tracking-widest uppercase">Live Preview Ready</p>
+                         </div>
+                       )}
                     </div>
-                    <div className="p-4 flex flex-col h-full bg-[#121212]">
-                      <h3 className="font-bold text-sm text-white mb-2 truncate">{p.name}</h3>
-                      <div className="flex items-center gap-2 text-neutral-500 text-[10px] uppercase font-mono mb-4">
-                        <span className="material-symbols-outlined text-xs">category</span> {p.template} <span className="mx-1">•</span> {p.mediaCount || 0} MEDIA
+
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                        <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-widest">Project Name</label>
+                        <input 
+                          type="text" 
+                          value={projectName}
+                          onChange={(e) => setProjectName(e.target.value)}
+                          className="w-full bg-[#27272A] border border-[#3F3F46] rounded-md px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                        />
                       </div>
-                      <div className="grid grid-cols-2 gap-2 mt-auto">
-                        <button onClick={() => deleteDoc(doc(db,"projects",p.id)).then(loadHistory)} className="col-span-2 flex items-center justify-center gap-1 py-2 rounded-lg bg-[#FF0000]/10 border border-[#FF0000]/20 text-xs font-bold text-[#FF4444] hover:bg-[#FF0000]/20 transition-all">
-                          <span className="material-symbols-outlined text-sm">delete</span> Delete
-                        </button>
+                      <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                         <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-widest flex items-center gap-2"><Server size={14}/> Backend IP/URL</label>
+                         <input 
+                           type="text" 
+                           value={backendUrl}
+                           onChange={(e) => setBackendUrl(e.target.value)}
+                           className="w-full bg-[#27272A] border border-[#3F3F46] rounded-md px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                           placeholder="http://192.168.1.X:10000/render"
+                         />
                       </div>
                     </div>
-                  </div>
-                ))}
-                {history.length === 0 && <div className="col-span-full text-center py-20 text-neutral-500 border border-dashed border-white/10 rounded-xl">No projects in history.</div>}
+
+                    {/* Template Selection */}
+                    <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                      <label className="block text-[10px] font-bold text-gray-500 mb-4 uppercase tracking-widest">Motion Models</label>
+                      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                        {MODELS.map(m => {
+                          const Icon = m.icon;
+                          const isActive = template === m.id;
+                          return (
+                            <button
+                              key={m.id}
+                              onClick={() => setTemplate(m.id)}
+                              className={cn(
+                                "flex flex-col items-center justify-center p-4 rounded-lg border transition-all",
+                                isActive 
+                                  ? "bg-blue-900/20 border-blue-500 text-blue-400 shadow-[0_0_15px_rgba(59,130,246,0.1)]" 
+                                  : "bg-[#27272A] border-[#3F3F46] text-gray-400 hover:text-white"
+                              )}
+                            >
+                              <Icon size={20} className="mb-2" />
+                              <span className="text-[10px] font-bold uppercase tracking-tighter">{m.name}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Media Upload */}
+                    <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                      <label className="block text-[10px] font-bold text-gray-500 mb-4 uppercase tracking-widest">Visual Media ({mediaFiles.length})</label>
+                      
+                      <div className="border-2 border-dashed border-[#3F3F46] rounded-xl p-8 hover:border-blue-500 transition-all bg-[#27272A]/30 text-center relative group">
+                        <UploadCloud size={48} className="mx-auto text-gray-600 mb-4 group-hover:text-blue-500 transition-colors" />
+                        <h3 className="text-sm font-bold mb-1">Drag and drop images or videos</h3>
+                        <p className="text-gray-500 text-[10px] mb-4">Multipart-data generation</p>
+                        <button className="bg-[#3F3F46] hover:bg-[#4F4F56] text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors">Browse</button>
+                        <input 
+                          type="file" 
+                          multiple 
+                          accept="image/*,video/*"
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          onChange={handleMediaUpload}
+                        />
+                      </div>
+                      
+                      {mediaFiles.length > 0 && (
+                        <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+                           {mediaFiles.map((f, i) => (
+                             <div key={i} className="flex-shrink-0 w-16 h-16 bg-[#27272A] border border-white/5 rounded-lg flex items-center justify-center text-[8px] overflow-hidden relative group">
+                                <span className="absolute inset-0 bg-red-600/80 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer text-white font-black transition-opacity" onClick={() => setMediaFiles(mediaFiles.filter((_, idx) => idx !== i))}>X</span>
+                                <span className="truncate px-2 text-neutral-400">{f.name}</span>
+                             </div>
+                           ))}
+                        </div>
+                      )}
+                    </div>
+                 </div>
+
+                 {/* Right Column: Audio & Generate */}
+                 <div className="md:col-span-4 space-y-6">
+                    <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                       <h3 className="text-[10px] font-bold text-gray-500 mb-6 uppercase tracking-widest flex items-center gap-2"><Mic size={14} className="text-blue-500"/> Voice Layer</h3>
+                       <div className="mb-6">
+                         <label className="bg-[#27272A] border border-[#3F3F46] hover:border-blue-500 rounded-xl p-4 block text-center cursor-pointer transition-all text-xs font-bold uppercase tracking-widest">
+                           {voiceFile ? <span className="text-blue-400">{voiceFile.name.substring(0,15)}...</span> : "Upload Voice"}
+                           <input type="file" accept="audio/*" className="hidden" onChange={(e) => setVoiceFile(e.target.files?.[0] || null)} />
+                         </label>
+                         {voiceFile && (
+                           <button onClick={() => setVoiceFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase">Remove</button>
+                         )}
+                       </div>
+                       
+                       <div className="space-y-2">
+                         <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                            <span>Level</span>
+                            <span className="text-blue-400">{Math.round(voiceVolume * 100)}%</span>
+                         </div>
+                         <input 
+                           type="range" 
+                           min="0" max="2" step="0.1" 
+                           value={voiceVolume} 
+                           onChange={(e) => setVoiceVolume(parseFloat(e.target.value))}
+                           className="w-full h-1 bg-white/5 rounded-lg appearance-none cursor-pointer accent-blue-500" 
+                         />
+                       </div>
+                    </div>
+
+                    <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                       <h3 className="text-[10px] font-bold text-gray-500 mb-6 uppercase tracking-widest flex items-center gap-2"><Music size={14} className="text-green-500"/> Music Layer</h3>
+                       <div className="mb-6">
+                         <label className="bg-[#27272A] border border-[#3F3F46] hover:border-green-500 rounded-xl p-4 block text-center cursor-pointer transition-all text-xs font-bold uppercase tracking-widest">
+                           {musicFile ? <span className="text-green-400">{musicFile.name.substring(0,15)}...</span> : "Upload Music"}
+                           <input type="file" accept="audio/*" className="hidden" onChange={(e) => setMusicFile(e.target.files?.[0] || null)} />
+                         </label>
+                         {musicFile && (
+                           <button onClick={() => setMusicFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase">Remove</button>
+                         )}
+                       </div>
+                       
+                       <div className="space-y-2">
+                         <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+                            <span>Level</span>
+                            <span className="text-green-400">{Math.round(musicVolume * 100)}%</span>
+                         </div>
+                         <input 
+                           type="range" 
+                           min="0" max="1" step="0.05" 
+                           value={musicVolume} 
+                           onChange={(e) => setMusicVolume(parseFloat(e.target.value))}
+                           className="w-full h-1 bg-white/5 rounded-lg appearance-none cursor-pointer accent-green-500" 
+                         />
+                       </div>
+                    </div>
+
+                    <div className="pt-4">
+                      <button 
+                        onClick={handleGenerate}
+                        disabled={mediaFiles.length === 0 || isGenerating}
+                        className={cn(
+                          "w-full py-5 rounded-2xl font-black text-sm uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all",
+                          mediaFiles.length > 0 && !isGenerating
+                            ? "bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_30px_rgba(37,99,235,0.3)] hover:scale-[1.02] active:scale-95" 
+                            : "bg-[#27272A] text-gray-600 cursor-not-allowed"
+                        )}>
+                        {isGenerating ? (
+                          <>
+                            <Loader2 size={20} className="animate-spin" /> Rendering...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles size={20} /> Create Collage
+                          </>
+                        )}
+                      </button>
+                      
+                      {videoUrl && !isGenerating && (
+                        <a 
+                          href={videoUrl} 
+                          download={`${projectName.replace(/ /g, "_")}.mp4`}
+                          className="w-full mt-4 py-4 rounded-2xl bg-green-600/10 border border-green-500/20 text-green-400 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-green-600/20 transition-all shadow-lg"
+                        >
+                          <Play size={16} className="fill-current"/> Save To Device
+                        </a>
+                      )}
+                    </div>
+                 </div>
               </div>
             </div>
           )}
