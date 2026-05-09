@@ -155,6 +155,10 @@ export default function Dashboard({ user }) {
     }
   };
 
+  const handlePlay = (id) => {
+    setPlayingId(playingId === id ? null : id);
+  };
+
   const handleMediaUpload = (e) => {
     if (e.target.files) {
       setMediaFiles(prev => [...prev, ...Array.from(e.target.files)]);
@@ -324,13 +328,27 @@ export default function Dashboard({ user }) {
                           SAVED
                         </div>
                         
-                        {playingId === project.id ? (
-                          <div className="flex flex-col items-center gap-2 p-4 text-center">
-                            <Video size={48} className="text-blue-500 animate-pulse" />
-                            <p className="text-xs text-gray-500">Video saved locally in your dashboard after generation.</p>
-                          </div>
+                        {playingId === project.id && project.videoUrl ? (
+                          <video 
+                            src={project.videoUrl} 
+                            controls 
+                            autoPlay 
+                            className="w-full h-full object-contain"
+                          />
                         ) : (
-                          <Clapperboard size={48} className="text-[#333] group-hover:text-[#444] transition-colors" />
+                          <>
+                            <Clapperboard size={48} className="text-[#333] group-hover:text-[#444] transition-colors" />
+                            {project.videoUrl && (
+                              <div 
+                                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
+                                onClick={() => handlePlay(project.id)}
+                              >
+                                <div className="bg-white/20 p-4 rounded-full backdrop-blur-sm">
+                                  <Play size={32} className="text-white fill-white ml-1" />
+                                </div>
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
 
@@ -403,8 +421,19 @@ export default function Dashboard({ user }) {
                         {editingId !== project.id && (
                           <div className="flex gap-2 mt-auto pt-3 border-t border-[#27272A]">
                             <button 
+                              onClick={() => handlePlay(project.id)}
+                              className={cn(
+                                "flex-1 py-2 rounded text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all",
+                                playingId === project.id 
+                                  ? "bg-[#27272A] text-white hover:bg-[#3F3F46]" 
+                                  : "bg-blue-900/30 text-blue-400 hover:bg-blue-900/50 border border-blue-900/50 hover:border-blue-700 w-full"
+                              )}
+                            >
+                              {playingId === project.id ? "Stop" : <><Play size={14} className="fill-current" /> Play</>}
+                            </button>
+                            <button 
                               onClick={() => handleDelete(project.id)}
-                              className="w-full bg-red-950/20 border border-red-900/30 hover:bg-red-900/40 text-red-500 py-2 rounded text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
+                              className="flex-1 bg-red-950/20 border border-red-900/30 hover:bg-red-900/40 text-red-500 py-2 rounded text-[10px] font-bold uppercase tracking-widest flex items-center justify-center gap-2 transition-all"
                             >
                               <Trash2 size={14} /> Delete
                             </button>
