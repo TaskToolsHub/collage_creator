@@ -201,10 +201,14 @@ export default function Dashboard({ user }) {
       const generatedUrl = URL.createObjectURL(blob);
       setVideoUrl(generatedUrl);
       
-      // Upload to Firebase Storage
-      const storageRef = ref(storage, `videos/${user.uid}/${Date.now()}_${projectName.replace(/ /g, "_")}.mp4`);
-      await uploadBytes(storageRef, blob);
-      const downloadURL = await getDownloadURL(storageRef);
+      let downloadURL = null;
+      try {
+        const storageRef = ref(storage, `videos/${user.uid}/${Date.now()}_${projectName.replace(/ /g, "_")}.mp4`);
+        await uploadBytes(storageRef, blob);
+        downloadURL = await getDownloadURL(storageRef);
+      } catch (storageError) {
+        console.warn("Storage upload skipped or failed:", storageError);
+      }
       
       await addDoc(collection(db, "projects"), {
         uid: user.uid,
