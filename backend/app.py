@@ -18,6 +18,7 @@ def render():
         project_name = request.form.get("projectName", "collage")
         voice_vol = float(request.form.get("voiceVolume", 1.0))
         music_vol = float(request.form.get("musicVolume", 0.2))
+        video_text = request.form.get("videoText", "")
         
         media_files = request.files.getlist("media")
         voice_file = request.files.get("voice")
@@ -44,7 +45,7 @@ def render():
             music_file.save(music_path)
 
         output = os.path.join(tmp, f"{project_name.replace(' ','_')}.mp4")
-        cmd = _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output)
+        cmd = _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, video_text, output)
         print(f"FFmpeg V4: {' '.join(cmd)}")
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
@@ -71,7 +72,7 @@ def get_duration(file_path):
         print(f"DEBUG: ffprobe failed for {file_path}: {e}", flush=True)
     return 0.0
 
-def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, output):
+def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, video_text, output):
     cmd = ["ffmpeg", "-y"]
     n = len(paths)
     
@@ -151,12 +152,18 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, ou
 
     if template == "pip":
         if n > 1:
-            filters.append(f"[v0][pip1]overlay=main_w-overlay_w-20:main_h-overlay_h-20[outv]")
+            filters.append(f"[v0][pip1]overlay=main_w-overlay_w-20:main_h-overlay_h-20[outv_pre]")
         else:
-            filters.append(f"[v0]copy[outv]")
+            filters.append(f"[v0]copy[outv_pre]")
     else:
         concat_in = "".join(f"[v{i}]" for i in range(n))
-        filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv]")
+        filters.append(f"{concat_in}concat=n={n}:v=1:a=0[outv_pre]")
+        
+    if video_text:
+        escaped_text = video_text.replace("'", "\\'").replace(":", "\\:")
+        filters.append(f"[outv_pre]drawtext=text='{escaped_text}':fontcolor=white:fontsize=24:box=1:boxcolor=black@0.5:boxborderw=5:x=(w-text_w)/2:y=h-th-40[outv]")
+    else:
+        filters.append(f"[outv_pre]copy[outv]")
         
     graph = ";".join(filters)
 

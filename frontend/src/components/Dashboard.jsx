@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { db, auth, RENDER_API_URL } from "../utils/firebase";
+import { db, auth, storage, RENDER_API_URL } from "../utils/firebase";
 import { 
   collection, 
   addDoc, 
@@ -11,6 +11,7 @@ import {
   updateDoc,
   serverTimestamp 
 } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { signOut } from "firebase/auth";
 import {
   Clapperboard,
@@ -33,12 +34,12 @@ import {
   Film,
   Server,
   Loader2,
-  Logout
+  LogOut
 } from 'lucide-react';
-import { clsx, type ClassValue } from 'clsx';
+import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-function cn(...inputs: ClassValue[]) {
+function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
 
@@ -65,6 +66,7 @@ export default function Dashboard({ user }) {
   // Studio tab state
   const [template, setTemplate] = useState('social');
   const [projectName, setProjectName] = useState('New Project');
+  const [videoText, setVideoText] = useState('');
   const [mediaFiles, setMediaFiles] = useState([]);
   const [voiceFile, setVoiceFile] = useState(null);
   const [musicFile, setMusicFile] = useState(null);
@@ -175,6 +177,7 @@ export default function Dashboard({ user }) {
       formData.append("uid", user.uid);
       formData.append("voiceVolume", voiceVolume.toString());
       formData.append("musicVolume", musicVolume.toString());
+      formData.append("videoText", videoText);
       
       mediaFiles.forEach(file => formData.append("media", file));
       if (voiceFile) formData.append("voice", voiceFile);
@@ -194,6 +197,11 @@ export default function Dashboard({ user }) {
       const generatedUrl = URL.createObjectURL(blob);
       setVideoUrl(generatedUrl);
       
+      // Upload to Firebase Storage
+      const storageRef = ref(storage, `videos/${user.uid}/${Date.now()}_${projectName.replace(/ /g, "_")}.mp4`);
+      await uploadBytes(storageRef, blob);
+      const downloadURL = await getDownloadURL(storageRef);
+      
       await addDoc(collection(db, "projects"), {
         uid: user.uid,
         name: projectName,
@@ -202,6 +210,7 @@ export default function Dashboard({ user }) {
         status: 'SAVED',
         description: '',
         referenceLink: '',
+        videoUrl: downloadURL,
         createdAt: serverTimestamp()
       });
       
@@ -266,7 +275,7 @@ export default function Dashboard({ user }) {
         
         <div className="p-4 border-t border-[#2A2A2A]">
            <button onClick={() => signOut(auth)} className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold text-gray-500 hover:text-white transition-colors">
-             <Logout size={16} /> LOGOUT
+             <LogOut size={16} /> LOGOUT
            </button>
         </div>
       </div>
@@ -436,7 +445,7 @@ export default function Dashboard({ user }) {
                        )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                       <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
                         <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-widest">Project Name</label>
                         <input 
@@ -444,6 +453,16 @@ export default function Dashboard({ user }) {
                           value={projectName}
                           onChange={(e) => setProjectName(e.target.value)}
                           className="w-full bg-[#27272A] border border-[#3F3F46] rounded-md px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                        />
+                      </div>
+                      <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
+                        <label className="block text-[10px] font-bold text-gray-500 mb-2 uppercase tracking-widest flex items-center gap-2">Text Overlay (Opt)</label>
+                        <input 
+                          type="text" 
+                          value={videoText}
+                          onChange={(e) => setVideoText(e.target.value)}
+                          className="w-full bg-[#27272A] border border-[#3F3F46] rounded-md px-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-all"
+                          placeholder="es. Link o Titolo"
                         />
                       </div>
                       <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
