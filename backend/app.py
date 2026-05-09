@@ -167,30 +167,24 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, vi
         
     graph = ";".join(filters)
 
-    if voice_path or music_path:
-        audio_filter = ""
-        inputs = 0
-        amap = []
-        if voice_path:
+        if voice_path and music_path:
             audio_filter += f"[{audio_idx_voice}:a]volume={voice_vol}[aV];"
-            amap.append("[aV]")
-            inputs += 1
-        if music_path:
             audio_filter += f"[{audio_idx_music}:a]volume={music_vol}[aM];"
-            amap.append("[aM]")
-            inputs += 1
-            
-        if inputs == 2:
             audio_filter += f"[aV][aM]amix=inputs=2:duration=first:dropout_transition=2[outa]"
-        else:
-            audio_filter += f"{amap[0]}copy[outa]"
+        elif voice_path:
+            audio_filter += f"[{audio_idx_voice}:a]volume={voice_vol}[outa]"
+        elif music_path:
+            audio_filter += f"[{audio_idx_music}:a]volume={music_vol}[outa]"
             
         graph += ";" + audio_filter
-        cmd += ["-filter_complex", graph, "-map", "[outv]", "-map", "[outa]", "-shortest"]
+        cmd += ["-filter_complex", graph, "-map", "[outv]", "-map", "[outa]"]
     else:
         cmd += ["-filter_complex", graph, "-map", "[outv]"]
 
-    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-movflags", "+faststart", output]
+    if total_audio_dur > 0:
+        cmd += ["-t", str(total_audio_dur)]
+
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart", output]
     return cmd
 
 if __name__ == "__main__":
