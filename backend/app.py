@@ -167,6 +167,8 @@ def _build_cmd(template, paths, voice_path, music_path, voice_vol, music_vol, vi
         
     graph = ";".join(filters)
 
+    if voice_path or music_path:
+        audio_filter = ""
         if voice_path and music_path:
             audio_filter += f"[{audio_idx_voice}:a]volume={voice_vol}[aV];"
             audio_filter += f"[{audio_idx_music}:a]volume={music_vol}[aM];"
