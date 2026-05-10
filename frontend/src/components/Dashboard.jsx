@@ -572,12 +572,17 @@ export default function Dashboard({ user }) {
                     <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
                        <h3 className="text-[10px] font-bold text-gray-500 mb-6 uppercase tracking-widest flex items-center gap-2"><Mic size={14} className="text-blue-500"/> Voice Layer</h3>
                        <div className="mb-6">
-                         <label className="bg-[#27272A] border border-[#3F3F46] hover:border-blue-500 rounded-xl p-4 block text-center cursor-pointer transition-all text-xs font-bold uppercase tracking-widest">
+                         <div className="bg-[#27272A] border border-[#3F3F46] hover:border-blue-500 rounded-xl p-4 text-center transition-all text-xs font-bold uppercase tracking-widest relative overflow-hidden">
                            {voiceFile ? <span className="text-blue-400">{voiceFile.name.substring(0,15)}...</span> : "Upload Voice"}
-                           <input type="file" accept="audio/*" className="hidden" onChange={(e) => setVoiceFile(e.target.files?.[0] || null)} />
-                         </label>
+                           <input 
+                             type="file" 
+                             accept="audio/*" 
+                             className="absolute inset-0 opacity-0 cursor-pointer" 
+                             onChange={(e) => setVoiceFile(e.target.files?.[0] || null)} 
+                           />
+                         </div>
                          {voiceFile && (
-                           <button onClick={() => setVoiceFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase">Remove</button>
+                           <button onClick={() => setVoiceFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase relative z-10">Remove</button>
                          )}
                        </div>
                        
@@ -599,12 +604,17 @@ export default function Dashboard({ user }) {
                     <div className="bg-[#18181B] border border-[#27272A] rounded-xl p-6">
                        <h3 className="text-[10px] font-bold text-gray-500 mb-6 uppercase tracking-widest flex items-center gap-2"><Music size={14} className="text-green-500"/> Music Layer</h3>
                        <div className="mb-6">
-                         <label className="bg-[#27272A] border border-[#3F3F46] hover:border-green-500 rounded-xl p-4 block text-center cursor-pointer transition-all text-xs font-bold uppercase tracking-widest">
+                         <div className="bg-[#27272A] border border-[#3F3F46] hover:border-blue-500 rounded-xl p-4 text-center transition-all text-xs font-bold uppercase tracking-widest relative overflow-hidden">
                            {musicFile ? <span className="text-green-400">{musicFile.name.substring(0,15)}...</span> : "Upload Music"}
-                           <input type="file" accept="audio/*" className="hidden" onChange={(e) => setMusicFile(e.target.files?.[0] || null)} />
-                         </label>
+                           <input 
+                             type="file" 
+                             accept="audio/*" 
+                             className="absolute inset-0 opacity-0 cursor-pointer" 
+                             onChange={(e) => setMusicFile(e.target.files?.[0] || null)} 
+                           />
+                         </div>
                          {musicFile && (
-                           <button onClick={() => setMusicFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase">Remove</button>
+                           <button onClick={() => setMusicFile(null)} className="text-red-500 text-[10px] mt-2 font-bold hover:underline uppercase relative z-10">Remove</button>
                          )}
                        </div>
                        
