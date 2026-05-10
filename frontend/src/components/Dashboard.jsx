@@ -577,7 +577,7 @@ export default function Dashboard({ user }) {
                            <input 
                              type="file" 
                              accept="audio/*" 
-                             className="absolute inset-0 opacity-0 cursor-pointer" 
+                             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
                              onChange={(e) => setVoiceFile(e.target.files?.[0] || null)} 
                            />
                          </div>
@@ -609,7 +609,7 @@ export default function Dashboard({ user }) {
                            <input 
                              type="file" 
                              accept="audio/*" 
-                             className="absolute inset-0 opacity-0 cursor-pointer" 
+                             className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
                              onChange={(e) => setMusicFile(e.target.files?.[0] || null)} 
                            />
                          </div>
