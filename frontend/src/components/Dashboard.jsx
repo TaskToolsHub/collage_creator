@@ -239,6 +239,7 @@ export default function Dashboard({ user }) {
       <div className="w-64 bg-[#141414] border-r border-[#2A2A2A] flex flex-col flex-shrink-0 relative z-20">
         <div className="p-6 h-20 flex items-center">
           <h1 className="text-xl font-bold tracking-tight flex items-center gap-2">
+             <img src="/logo.png" alt="Icon" className="w-8 h-8 rounded border border-[#27272A]" />
              AI VIDEO STUDIO
           </h1>
         </div>
