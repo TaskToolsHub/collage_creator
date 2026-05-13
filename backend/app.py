@@ -62,7 +62,7 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
         cmd += ["-i", voice_path]
         audio_idx_voice = n
     if music_path:
-        cmd += ["-stream_loop", "-1", "-i", music_path]
+        cmd += ["-i", music_path]
         audio_idx_music = n + (1 if voice_path else 0)
 
     # ── Risoluzione output ────────────────────────────────────────────────────
@@ -122,15 +122,17 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
         filters.append("[outv_pre]copy[vout]")
 
     # ── Mixer audio ───────────────────────────────────────────────────────────
+    # apad estende la musica con silenzio fino alla fine del video (compatibile
+    # con tutte le versioni di FFmpeg, a differenza di -stream_loop)
     amix = ""
     if voice_path and music_path:
         amix = (f"[{audio_idx_voice}:a]volume={voice_vol}[a1];"
-                f"[{audio_idx_music}:a]volume={music_vol}[a2];"
+                f"[{audio_idx_music}:a]volume={music_vol},apad[a2];"
                 f"[a1][a2]amix=inputs=2[aout]")
     elif voice_path:
         amix = f"[{audio_idx_voice}:a]volume={voice_vol}[aout]"
     elif music_path:
-        amix = f"[{audio_idx_music}:a]volume={music_vol}[aout]"
+        amix = f"[{audio_idx_music}:a]volume={music_vol},apad[aout]"
 
     # ── Assemblaggio filter_complex ───────────────────────────────────────────
     filter_complex = ";".join(filters)
