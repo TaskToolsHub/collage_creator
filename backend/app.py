@@ -42,7 +42,8 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
     # ── Input media (con supporto Trim per i video) ───────────────────────────
     for i, p in enumerate(paths):
         setting = media_settings[i] if i < len(media_settings) else {}
-        is_video = setting.get("type", "image") == "video"
+        ext = os.path.splitext(p)[1].lower()
+        is_video = setting.get("type", "image") == "video" or ext in [".mp4", ".mov", ".webm", ".avi", ".mkv"]
         trim_start = float(setting.get("trimStart", 0))
         trim_end = setting.get("trimEnd")
 
