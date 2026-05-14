@@ -39,6 +39,8 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
     img_dur = 3.0  # durata immagini statiche di default
     cmd = ["ffmpeg", "-y"]
 
+    target_dur = 0.0
+
     # ── Input media (con supporto Trim per i video) ───────────────────────────
     for i, p in enumerate(paths):
         setting = media_settings[i] if i < len(media_settings) else {}
@@ -47,14 +49,26 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
         trim_start = float(setting.get("trimStart", 0))
         trim_end = setting.get("trimEnd")
 
+        item_dur = 0.0
         if is_video:
             if trim_end is not None:
                 duration = float(trim_end) - trim_start
                 cmd += ["-ss", str(trim_start), "-t", str(duration), "-i", p]
+                item_dur = duration
             else:
                 cmd += ["-ss", str(trim_start), "-i", p]
+                item_dur = max(0.0, get_duration(p) - trim_start)
         else:
             cmd += ["-loop", "1", "-t", str(img_dur), "-i", p]
+            item_dur = img_dur
+
+        if template == "pip":
+            if i == 0: target_dur = item_dur
+        else:
+            target_dur += item_dur
+
+    if target_dur <= 0:
+        target_dur = 5.0
 
     # ── Input audio ───────────────────────────────────────────────────────────
     audio_idx_voice = -1
@@ -144,9 +158,10 @@ def _build_cmd(template, paths, media_settings, voice_path, music_path,
     if amix:
         cmd += ["-map", "[aout]"]
 
-    # -shortest taglia la musica infinita esattamente quando finisce il video
+    # Sostituito -shortest con -t target_dur per tagliare con precisione millimetrica
+    # evitando i blocchi infiniti causati dal mix di apad e shortest nelle vecchie versioni
     cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart", "-shortest", output]
+            "-movflags", "+faststart", "-t", str(target_dur), output]
     return cmd
 
 # ─── Endpoint di rendering ────────────────────────────────────────────────────
